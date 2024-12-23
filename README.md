@@ -3,16 +3,13 @@
 A broadcast negentropy meshtastic nostr relay
 
 ```mermaid
-flowchart LR
+flowchart TD
+   CLIENT["`**Any Nostr Client**`"]
+   style MESH fill:#bbb,stroke:#333,stroke-width:4px
+
    RELAY["`**noshtastic-relay**
    localhost nostr relay`"]
    style RELAY fill:#9bf,stroke:#333,stroke-width:4px
-
-   GHOST1[ ]
-   style GHOST1 fill:none,stroke:none
-
-   GHOST2[ ]
-   style GHOST2 fill:none,stroke:none
 
    NOSTRDB@{ shape: lin-cyl, label: "nostrdb" }
    style NOSTRDB fill:#bbb,stroke:#333,stroke-width:4px
@@ -43,12 +40,10 @@ flowchart LR
    Noshtastic
    Node`"]
 
-   subgraph phone
-   RELAY ~~~ GHOST1
-   RELAY ~~~ GHOST2
+   CLIENT<-->|wss|RELAY
+
+   subgraph **Phone App**
    RELAY<-->|api|NOSTRDB
-   GHOST1 ~~~ SYNC
-   GHOST2 ~~~ SYNC
    NOSTRDB<-->|api|SYNC
    SYNC<-->|api|LINK
    end
