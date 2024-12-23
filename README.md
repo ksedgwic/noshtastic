@@ -1,8 +1,10 @@
-# RadHoc
+# Noshtastic
+
+A broadcast negentropy meshtastic nostr relay
 
 ```mermaid
 flowchart LR
-   RELAY["`**radhoc-relay**
+   RELAY["`**noshtastic-relay**
    localhost nostr relay`"]
    style RELAY fill:#9bf,stroke:#333,stroke-width:4px
 
@@ -15,11 +17,11 @@ flowchart LR
    NOSTRDB@{ shape: lin-cyl, label: "nostrdb" }
    style NOSTRDB fill:#bbb,stroke:#333,stroke-width:4px
 
-   SYNC["`**radhoc-sync**
+   SYNC["`**noshtastic-sync**
    (modified negentropy)`"]
    style SYNC fill:#9bf,stroke:#333,stroke-width:4px
 
-   LINK["`**radhoc-link**
+   LINK["`**noshtastic-link**
    (encoding, fragmentation)`"]
    style LINK fill:#9bf,stroke:#333,stroke-width:4px
 
@@ -30,15 +32,15 @@ flowchart LR
    LORA(("`LoRa`"))
 
    PEER0["`Peer
-   RadHoc
+   Noshtastic
    Node`"]
 
    PEER1["`Peer
-   RadHoc
+   Noshtastic
    Node`"]
 
    PEER2["`Peer
-   RadHoc
+   Noshtastic
    Node`"]
 
    subgraph phone
