@@ -1,0 +1,20 @@
+[package]
+name = "noshtastic-app"
+description = "A program for syncing nostr messages over a meshtastic network."
+version = "0.1.0"
+authors = ["Ken Sedgwick <ken@bonsai.com>"]
+edition = "2021"
+
+[dependencies]
+# local dependencies
+noshtastic-link = { workspace = true }
+noshtastic-sync = { workspace = true }
+
+# common dependencies
+log = { workspace = true }
+tokio = { workspace = true }
+
+# unique dependencies
+anyhow = "1.0.95"
+clap = { version = "4.5.23", features = ["derive"] }
+env_logger = "0.11"

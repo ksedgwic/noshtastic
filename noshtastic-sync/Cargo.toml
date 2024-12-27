@@ -1,0 +1,22 @@
+[package]
+name = "noshtastic-sync"
+description = "A module which synchronizes nostr messages using modified negentropy."
+version = "0.1.0"
+authors = ["Ken Sedgwick <ken@bonsai.com>"]
+edition = "2021"
+
+[dependencies]
+# local dependencies
+noshtastic-link = { workspace = true }
+
+# common dependencies
+log = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+
+# unique dependencies
+
+[build-dependencies]
+tonic-build = "0.8"

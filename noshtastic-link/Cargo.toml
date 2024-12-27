@@ -1,0 +1,27 @@
+[package]
+name = "noshtastic-link"
+description = "A library which facilitates sending noshtastic messages to meshtastic radios."
+version = "0.1.0"
+authors = ["Ken Sedgwick <ken@bonsai.com>"]
+edition = "2021"
+
+[dependencies]
+# common dependencies
+async-trait = { workspace = true }
+log = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+
+# unique dependencies
+tokio-serial = "5.4.4"
+
+# need https://github.com/meshtastic/rust/pull/24
+[dependencies.meshtastic]
+version = "0.1.6"
+git = "https://github.com/meshtastic/rust.git"
+rev = "1e372172ea0579622a56a36d0c0cec3a17d2fbf6"
+
+[build-dependencies]
+tonic-build = "0.8"

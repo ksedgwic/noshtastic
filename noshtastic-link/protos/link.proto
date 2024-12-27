@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package noshtastic_link;
+
+// Link frame definition
+message LinkFrame {
+    uint32 version = 1; // Link version byte
+    bytes data = 2;     // Raw data buffer
+}

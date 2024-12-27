@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package noshtastic_sync;
+
+// A versioned sync message
+message SyncMessage {
+    uint32 version = 1;  // Protocol version
+    oneof payload {
+        Ping ping = 2;
+        Pong pong = 3;
+    }
+}
+
+// Ping message
+message Ping {
+    uint32 id = 1;  // Unique ping identifier
+}
+
+// Pong message
+message Pong {
+    uint32 id = 1;  // Corresponding ping ID
+}
