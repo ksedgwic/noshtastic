@@ -15,7 +15,7 @@ tokio = { workspace = true }
 tonic = { workspace = true }
 
 # unique dependencies
-tokio-serial = "5.4.4"
+tokio-serial = "5.4"
 
 # need https://github.com/meshtastic/rust/pull/24
 [dependencies.meshtastic]
