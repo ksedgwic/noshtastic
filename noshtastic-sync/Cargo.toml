@@ -11,6 +11,7 @@ noshtastic-link = { workspace = true }
 
 # common dependencies
 log = { workspace = true }
+nostrdb = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

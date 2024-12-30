@@ -13,9 +13,11 @@ noshtastic-sync = { workspace = true }
 # common dependencies
 log = { workspace = true }
 tokio = { workspace = true }
+nostrdb = { workspace = true }
 
 # unique dependencies
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-env_logger = "0.11"
 chrono = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+directories-next = "2.0"
+env_logger = "0.11"

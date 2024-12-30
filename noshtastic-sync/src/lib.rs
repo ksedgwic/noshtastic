@@ -1,4 +1,5 @@
 use log::*;
+use nostrdb::Ndb;
 use prost::Message;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -22,14 +23,20 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Sync {
+    _ndb: Ndb,
     linkref: LinkRef,
     ping_duration: Option<Duration>, // None means no pinging
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
-    pub fn new(linkref: LinkRef, receiver: mpsc::Receiver<LinkMessage>) -> SyncResult<SyncRef> {
+    pub fn new(
+        _ndb: Ndb,
+        linkref: LinkRef,
+        receiver: mpsc::Receiver<LinkMessage>,
+    ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
+            _ndb,
             linkref,
             ping_duration: None,
         }));

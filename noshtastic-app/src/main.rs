@@ -1,11 +1,14 @@
 use anyhow::Result;
 use chrono::Local;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser};
+use directories_next::ProjectDirs;
 use env_logger::fmt::Formatter;
 use env_logger::Builder;
 use log::*;
+use nostrdb::{Config, Ndb};
 use std::env;
 use std::io::Write;
+use std::path::Path;
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 
@@ -22,6 +25,35 @@ struct Args {
         help = "the serial device, defaults to auto detect"
     )]
     serial: Option<String>,
+
+    #[arg(
+        short,
+        long,
+        alias = "data-dir",
+        help = "The data directory",
+        default_value_t = default_data_dir() // Use a function for default value
+    )]
+    data_dir: String,
+}
+
+fn default_data_dir() -> String {
+    ProjectDirs::from("com", "bonsai", "noshtastic")
+        .map(|dirs| dirs.data_dir().to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.noshtastic".to_string())
+}
+
+fn build_args_with_help() -> Result<Args> {
+    let default_dir = default_data_dir();
+    let default_dir_static: &'static str = Box::leak(default_dir.into_boxed_str());
+    let mut cmd = Args::command();
+    cmd = cmd.mut_arg("data_dir", |arg| {
+        arg.help(format!(
+            "The data directory, defaults to {}",
+            default_dir_static
+        ))
+        .default_value(default_dir_static) // Set the default value dynamically
+    });
+    Ok(Args::from_arg_matches(&cmd.get_matches())?)
 }
 
 fn init_logger() {
@@ -46,12 +78,27 @@ fn init_logger() {
         .init();
 }
 
+fn init_nostrdb(data_dir: &str) -> Result<Ndb> {
+    let datapath = Path::new(data_dir);
+    let dbpath = datapath.join("db");
+    let mapsize = if cfg!(target_os = "windows") {
+        // 16 Gib on windows because it actually creates the file
+        1024usize * 1024usize * 1024usize * 16usize
+    } else {
+        // 1 TiB for everything else since its just virtually mapped
+        1024usize * 1024usize * 1024usize * 1024usize
+    };
+    let config = Config::new().set_ingester_threads(4).set_mapsize(mapsize);
+    Ok(Ndb::new(&dbpath.to_string_lossy(), &config)?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logger();
-    let args = Args::parse();
+    let args = build_args_with_help()?;
+    let ndb = init_nostrdb(&args.data_dir)?;
     let (linkref, receiver) = create_link(&args.serial).await?;
-    let syncref = Sync::new(linkref, receiver)?;
+    let syncref = Sync::new(ndb, linkref, receiver)?;
 
     // give the config a chance to settle before pinging
     sleep(Duration::from_secs(10)).await;
