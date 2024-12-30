@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use log::*;
 use tokio::signal;
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 
 use noshtastic_link::create_link;
 use noshtastic_sync::Sync;
@@ -25,6 +25,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let (linkref, receiver) = create_link(&args.serial).await?;
     let syncref = Sync::new(linkref, receiver)?;
+
+    // give the config a chance to settle before pinging
+    sleep(Duration::from_secs(10)).await;
 
     Sync::start_pinging(syncref.clone(), Duration::from_secs(30))?;
 
