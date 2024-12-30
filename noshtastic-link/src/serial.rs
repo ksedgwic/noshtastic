@@ -197,31 +197,19 @@ impl MeshtasticLink for SerialLink {
     }
 }
 
-#[allow(dead_code)] // FIXME - remove this asap
-struct HandlerMetadata {
-    should_update_db: bool,
-}
-
 struct LinkPacketRouter {
     my_id: NodeId,
 }
 
-impl PacketRouter<HandlerMetadata, LinkError> for LinkPacketRouter {
-    fn handle_packet_from_radio(
-        &mut self,
-        packet: FromRadio,
-    ) -> Result<HandlerMetadata, LinkError> {
+impl PacketRouter<(), LinkError> for LinkPacketRouter {
+    fn handle_packet_from_radio(&mut self, packet: FromRadio) -> Result<(), LinkError> {
         dbg!(packet);
-        Ok(HandlerMetadata {
-            should_update_db: false,
-        })
+        Ok(())
     }
 
-    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<HandlerMetadata, LinkError> {
+    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<(), LinkError> {
         dbg!(packet);
-        Ok(HandlerMetadata {
-            should_update_db: false,
-        })
+        Ok(())
     }
 
     fn source_node_id(&self) -> NodeId {
