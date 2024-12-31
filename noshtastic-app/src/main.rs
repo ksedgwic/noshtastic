@@ -12,6 +12,7 @@ use std::path::Path;
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 
+use noshtastic_bridge::Bridge;
 use noshtastic_link::create_link;
 use noshtastic_sync::Sync;
 
@@ -34,6 +35,20 @@ struct Args {
         default_value_t = default_data_dir() // Use a function for default value
     )]
     data_dir: String,
+
+    #[arg(
+        short = 'r',
+        long = "bridge-relay",
+        help = "The nostr relay address to bridge, optional"
+    )]
+    bridge_relay: Option<String>,
+
+    #[arg(
+        short = 'f',
+        long = "bridge-filter",
+        help = "The nostr filter to bridge, optional"
+    )]
+    bridge_filter: Option<String>,
 }
 
 fn default_data_dir() -> String {
@@ -97,15 +112,19 @@ async fn main() -> Result<()> {
     init_logger();
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
+    let mut bridge = Bridge::new(ndb.clone(), &args.bridge_relay, &args.bridge_filter)?;
     let (linkref, receiver) = create_link(&args.serial).await?;
-    let syncref = Sync::new(ndb, linkref, receiver)?;
+    let syncref = Sync::new(ndb.clone(), linkref, receiver)?;
+
+    bridge.start()?;
 
     // give the config a chance to settle before pinging
-    sleep(Duration::from_secs(10)).await;
+    sleep(Duration::from_secs(5)).await;
 
     Sync::start_pinging(syncref.clone(), Duration::from_secs(30))?;
 
     // wait for termination signal
+    info!("waiting for ^C to terminate ...");
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("Received ^C, shutting down.");
@@ -113,6 +132,7 @@ async fn main() -> Result<()> {
     }
 
     syncref.lock().unwrap().stop_pinging()?;
+    bridge.stop()?;
 
     Ok(())
 }
