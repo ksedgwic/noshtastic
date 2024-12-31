@@ -6,13 +6,16 @@ use meshtastic::protobufs::{from_radio, mesh_packet};
 use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
 use meshtastic::types::NodeId;
 use meshtastic::utils;
+use prost::Message;
 use std::sync::Arc;
 use tokio;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 use tokio::task;
 
-use crate::{LinkError, LinkMessage, LinkRef, LinkResult, MeshtasticLink};
+use crate::{
+    LinkError, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink, Payload,
+};
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -101,13 +104,12 @@ impl SerialLink {
         mut packet_receiver: UnboundedReceiver<FromRadio>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<mpsc::Receiver<LinkMessage>> {
-        let (link_sender, link_receiver) = mpsc::channel(100);
+        let (link_sender, link_receiver) = mpsc::channel::<LinkMessage>(100);
         task::spawn(async move {
             info!("mesh_listener starting");
             loop {
                 tokio::select! {
                     Some(packet) = packet_receiver.recv() => {
-                        // debug!("received: {:#?}", packet);
                         match packet.payload_variant {
                             Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
                                 linkref.lock().await.set_my_node_num(myinfo.my_node_num);
@@ -115,16 +117,35 @@ impl SerialLink {
                             Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
                                 if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded))
                                     = mesh_packet.payload_variant {
-                                        if decoded.portnum() == PortNum::PrivateApp {
-                                            if let Err(err) = link_sender.send(
-                                                decoded.payload.clone().into()).await {
-                                                error!("failed to send packet: {}", err);
-                                                // keep going for now
+                                    if decoded.portnum() == PortNum::PrivateApp {
+                                        // Attempt to decode the payload as a LinkFrame
+                                        match LinkFrame::decode(&*decoded.payload) {
+                                            Ok(link_frame) => {
+                                                match link_frame.payload {
+                                                    Some(Payload::Message(link_msg)) => {
+                                                        // Forward the unfragmented message
+                                                        if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
+                                                            error!("failed to send message: {}", err);
+                                                            // Keep going
+                                                        }
+                                                    }
+                                                    Some(Payload::Fragment(link_frag)) => {
+                                                        info!("Received fragment: id={}, index={}", link_frag.id, link_frag.index);
+                                                        unimplemented!("message fragmentation unimplemented");
+                                                    }
+                                                    None => {
+                                                        warn!("LinkFrame payload is missing");
+                                                    }
+                                                }
+                                            }
+                                            Err(err) => {
+                                                error!("Failed to decode LinkFrame: {:?}", err);
                                             }
                                         }
                                     }
+                                }
                             }
-                            _ => {} // ignore others
+                            _ => {} // Ignore other variants
                         }
                     },
                     _ = stop_signal.notified() => {
@@ -146,8 +167,24 @@ impl SerialLink {
             info!("client_listener starting");
             loop {
                 tokio::select! {
-                    Some(packet) = client_receiver.recv() => {
+                    Some(msg) = client_receiver.recv() => {
                         let mut link = linkref.lock().await;
+
+                        let link_message = LinkMsg {
+                            data: msg.data.clone(),
+                        };
+                        let link_frame = LinkFrame {
+                            magic: 0x48534F4E, // 'NOSH'
+                            version: 1,        // Protocol version
+                            payload: Some(Payload::Message(link_message)),
+                        };
+
+                        // Serialize the LinkFrame into bytes
+                        let mut buffer = Vec::new();
+                        if let Err(err) = link_frame.encode(&mut buffer) {
+                            error!("Failed to serialize LinkFrame: {:?}", err);
+                            continue;
+                        }
 
                         let mut router = LinkPacketRouter {
                             my_id: link.my_node_num.into(),
@@ -163,7 +200,7 @@ impl SerialLink {
                         if let Err(err) = link.stream_api
                             .send_mesh_packet(
                                 &mut router,
-                                packet.to_bytes().into(),
+                                buffer.into(),
                                 port_num,
                                 destination,
                                 channel,

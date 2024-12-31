@@ -4,6 +4,23 @@ package noshtastic_link;
 
 // Link frame definition
 message LinkFrame {
-    uint32 version = 1; // Link version byte
-    bytes data = 2;     // Raw data buffer
+  fixed32 magic = 1; // 'NOSH'
+  uint32 version = 2;
+  oneof payload {
+    LinkMsg message = 3;	// A complete, unfragmented message
+    LinkFrag fragment = 4;	// A fragment of a message
+  }
+}
+
+// A complete link message (not fragmented)
+message LinkMsg {
+  bytes data = 1;
+}
+
+// A fragment of a link message
+message LinkFrag {
+  fixed64 id = 1;	// Unique identifier for the fragmented packet
+  uint32 total = 2;     // Total number of fragments in the packet
+  uint32 index = 3;	// Index of this fragment (starting at 0)
+  bytes data = 4;	// Raw data buffer for this fragment
 }
