@@ -13,7 +13,7 @@ pub mod proto {
     include!("../protos/noshtastic_link.rs");
 }
 
-pub use proto::{link_frame::Payload, LinkFrame, LinkMsg};
+pub use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
 
 pub type LinkRef = Arc<tokio::sync::Mutex<dyn MeshtasticLink>>;
 

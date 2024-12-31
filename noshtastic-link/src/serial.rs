@@ -14,7 +14,8 @@ use tokio::sync::{Mutex, Notify};
 use tokio::task;
 
 use crate::{
-    LinkError, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink, Payload,
+    LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
+    Payload,
 };
 
 #[allow(dead_code)] // FIXME - remove this asap
@@ -110,43 +111,7 @@ impl SerialLink {
             loop {
                 tokio::select! {
                     Some(packet) = packet_receiver.recv() => {
-                        match packet.payload_variant {
-                            Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
-                                linkref.lock().await.set_my_node_num(myinfo.my_node_num);
-                            }
-                            Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
-                                if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded))
-                                    = mesh_packet.payload_variant {
-                                    if decoded.portnum() == PortNum::PrivateApp {
-                                        // Attempt to decode the payload as a LinkFrame
-                                        match LinkFrame::decode(&*decoded.payload) {
-                                            Ok(link_frame) => {
-                                                match link_frame.payload {
-                                                    Some(Payload::Message(link_msg)) => {
-                                                        // Forward the unfragmented message
-                                                        if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
-                                                            error!("failed to send message: {}", err);
-                                                            // Keep going
-                                                        }
-                                                    }
-                                                    Some(Payload::Fragment(link_frag)) => {
-                                                        info!("Received fragment: id={}, index={}", link_frag.id, link_frag.index);
-                                                        unimplemented!("message fragmentation unimplemented");
-                                                    }
-                                                    None => {
-                                                        warn!("LinkFrame payload is missing");
-                                                    }
-                                                }
-                                            }
-                                            Err(err) => {
-                                                error!("Failed to decode LinkFrame: {:?}", err);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {} // Ignore other variants
-                        }
+                        Self::handle_packet(&linkref, packet, &link_sender).await;
                     },
                     _ = stop_signal.notified() => {
                         break;
@@ -156,6 +121,67 @@ impl SerialLink {
             info!("mesh_listener finished");
         });
         Ok(link_receiver)
+    }
+
+    // Handle incoming packets
+    async fn handle_packet(
+        linkref: &SerialLinkRef,
+        packet: FromRadio,
+        link_sender: &mpsc::Sender<LinkMessage>,
+    ) {
+        match packet.payload_variant {
+            Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
+                linkref.lock().await.set_my_node_num(myinfo.my_node_num);
+            }
+            Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
+                Self::handle_mesh_packet(mesh_packet, link_sender).await;
+            }
+            _ => {} // Ignore other variants
+        }
+    }
+
+    // Handle mesh packets
+    async fn handle_mesh_packet(mesh_packet: MeshPacket, link_sender: &mpsc::Sender<LinkMessage>) {
+        if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
+        {
+            if decoded.portnum() == PortNum::PrivateApp {
+                match Self::decode_link_frame(decoded.payload.clone()) {
+                    Ok(link_frame) => Self::process_link_frame(link_frame, link_sender).await,
+                    Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
+                }
+            }
+        }
+    }
+
+    // Decode the LinkFrame
+    fn decode_link_frame(payload: Vec<u8>) -> Result<LinkFrame, prost::DecodeError> {
+        LinkFrame::decode(&*payload)
+    }
+
+    // Process the LinkFrame
+    async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
+        match link_frame.payload {
+            Some(Payload::Message(link_msg)) => {
+                if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
+                    error!("failed to send message: {}", err);
+                }
+            }
+            Some(Payload::Fragment(link_frag)) => {
+                Self::handle_fragment(link_frag);
+            }
+            None => {
+                warn!("LinkFrame payload is missing");
+            }
+        }
+    }
+
+    // Handle fragmented messages (stub for now)
+    fn handle_fragment(link_frag: LinkFrag) {
+        info!(
+            "Received fragment: id={}, index={}",
+            link_frag.id, link_frag.index
+        );
+        unimplemented!("message fragmentation unimplemented");
     }
 
     fn start_client_listener(
