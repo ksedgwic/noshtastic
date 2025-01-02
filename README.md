@@ -1,5 +1,12 @@
 # Noshtastic: A Geo-Specific Virtual Nostr Relay for Meshtastic
 
+**Noshtastic** operates as a **standalone Nostr network**, designed to
+function independently of internet-based Nostr relays. Unlike other
+setups that rely on gatewaying nostr events to and from
+internet-connected relays, Noshtastic focuses on creating a
+decentralized and fully self-sufficient communication network using
+only Meshtastic devices. This ensures reliable message synchronization
+even in environments without internet connectivity.
 
 ```mermaid
 flowchart TD
@@ -57,9 +64,7 @@ flowchart TD
    LORA<-.->PEER1
    LORA<-.->PEER2
 ```
-Negentropy-based synchronization is configured using Geohash specified regions:
-
-A geohash location tag is added to events intended for noshtastic synchronization.
+Noshtastic uses negentropy-based synchronization configured using geohash-specified regions. A geohash location tag is added to events intended for Noshtastic distribution:
 ```
 ...
 {
@@ -72,7 +77,9 @@ A geohash location tag is added to events intended for noshtastic synchronizatio
 ...
 ```
 
-Noshtastic relays are configured to synchronize messages for specific regions.  For example a noshtastic relay might cover **`9q[bc89]`** (the region including `9qb`, `9qc`, `9q8`, and `9q9`).
+Noshtastic relays are configured to synchronize messages for specific
+regions.  For example a noshtastic relay might cover **`9q[bc89]`**
+(the region including `9qb`, `9qc`, `9q8`, and `9q9`).
 
 ![Bay Area Geohash](doc/bayarea-geohash.png)
 
