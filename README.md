@@ -1,6 +1,5 @@
-# Noshtastic
+# Noshtastic: A Geo-Specific Virtual Nostr Relay for Meshtastic
 
-A broadcast negentropy meshtastic nostr relay
 
 ```mermaid
 flowchart TD
@@ -58,3 +57,23 @@ flowchart TD
    LORA<-.->PEER1
    LORA<-.->PEER2
 ```
+Negentropy-based synchronization is configured using Geohash specified regions:
+
+A geohash location tag is added to events intended for noshtastic synchronization.
+```
+...
+{
+  "tags": [
+    ...
+    ["nosh", "9q9p1dtf1"],
+    ...
+  ],
+}
+...
+```
+
+Noshtastic relays are configured to synchronize messages for specific regions.  For example a noshtastic relay might cover **`9q[bc89]`** (the region including `9qb`, `9qc`, `9q8`, and `9q9`).
+
+![Bay Area Geohash](doc/bayarea-geohash.png)
+
+*Image source: [Geohash Explorer by Chris Hewett](https://chrishewett.com/blog/geohash-explorer/)*
