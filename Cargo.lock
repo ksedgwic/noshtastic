@@ -681,7 +681,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 [[package]]
 name = "enostr"
 version = "0.1.0"
-source = "git+https://github.com/damus-io/notedeck.git?branch=master#eeab1666e7e8e868438a69024e9cb99f15f8713a"
+source = "git+https://github.com/damus-io/notedeck.git?rev=eeab1666e7e8e868438a69024e9cb99f15f8713a#eeab1666e7e8e868438a69024e9cb99f15f8713a"
 dependencies = [
  "bech32",
  "ewebsock",

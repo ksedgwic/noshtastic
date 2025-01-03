@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 # unique dependencies
-enostr = { git = "https://github.com/damus-io/notedeck.git", subdir = "crates/enostr", branch = "master" }
+enostr = { git = "https://github.com/damus-io/notedeck.git", rev = "eeab1666e7e8e868438a69024e9cb99f15f8713a" }
 uuid = { version = "1.11", features = ["v4"] }
 
 [dev-dependencies]
