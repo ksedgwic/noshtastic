@@ -1,23 +1,24 @@
 [package]
-name = "noshtastic-sync"
-description = "A module which synchronizes nostr messages using modified negentropy."
+name = "noshtastic-bridge"
+description = "Bridges packets to and from nostr relays."
 version = "0.1.0"
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
 
 [dependencies]
 # local dependencies
-noshtastic-link = { workspace = true }
 
 # common dependencies
 log = { workspace = true }
 nostrdb = { workspace = true }
-prost = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
 
 # unique dependencies
+enostr = { path = "../../notedeck/crates/enostr" }
+uuid = { version = "1.11", features = ["v4"] }
 
-[build-dependencies]
-tonic-build = "0.8"
+[dev-dependencies]
+env_logger = { workspace = true }
+hex = { workspace = true }
+once_cell = "1.20"

@@ -1,3 +1,8 @@
+// Copyright (C) 2025 Bonsai Software, Inc.
+// This file is part of Noshtastic, and is licensed under the
+// GNU General Public License, version 3 or later. See the LICENSE file
+// or <https://www.gnu.org/licenses/> for details.
+
 use async_trait::async_trait;
 use log::*;
 use meshtastic::api::{ConnectedStreamApi, StreamApi};
@@ -6,13 +11,17 @@ use meshtastic::protobufs::{from_radio, mesh_packet};
 use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
 use meshtastic::types::NodeId;
 use meshtastic::utils;
+use prost::Message;
 use std::sync::Arc;
 use tokio;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 use tokio::task;
 
-use crate::{LinkError, LinkMessage, LinkRef, LinkResult, MeshtasticLink};
+use crate::{
+    LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
+    Payload,
+};
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -101,31 +110,13 @@ impl SerialLink {
         mut packet_receiver: UnboundedReceiver<FromRadio>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<mpsc::Receiver<LinkMessage>> {
-        let (link_sender, link_receiver) = mpsc::channel(100);
+        let (link_sender, link_receiver) = mpsc::channel::<LinkMessage>(100);
         task::spawn(async move {
             info!("mesh_listener starting");
             loop {
                 tokio::select! {
                     Some(packet) = packet_receiver.recv() => {
-                        // debug!("received: {:#?}", packet);
-                        match packet.payload_variant {
-                            Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
-                                linkref.lock().await.set_my_node_num(myinfo.my_node_num);
-                            }
-                            Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
-                                if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded))
-                                    = mesh_packet.payload_variant {
-                                        if decoded.portnum() == PortNum::PrivateApp {
-                                            if let Err(err) = link_sender.send(
-                                                decoded.payload.clone().into()).await {
-                                                error!("failed to send packet: {}", err);
-                                                // keep going for now
-                                            }
-                                        }
-                                    }
-                            }
-                            _ => {} // ignore others
-                        }
+                        Self::handle_packet(&linkref, packet, &link_sender).await;
                     },
                     _ = stop_signal.notified() => {
                         break;
@@ -137,6 +128,67 @@ impl SerialLink {
         Ok(link_receiver)
     }
 
+    // Handle incoming packets
+    async fn handle_packet(
+        linkref: &SerialLinkRef,
+        packet: FromRadio,
+        link_sender: &mpsc::Sender<LinkMessage>,
+    ) {
+        match packet.payload_variant {
+            Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
+                linkref.lock().await.set_my_node_num(myinfo.my_node_num);
+            }
+            Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
+                Self::handle_mesh_packet(mesh_packet, link_sender).await;
+            }
+            _ => {} // Ignore other variants
+        }
+    }
+
+    // Handle mesh packets
+    async fn handle_mesh_packet(mesh_packet: MeshPacket, link_sender: &mpsc::Sender<LinkMessage>) {
+        if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
+        {
+            if decoded.portnum() == PortNum::PrivateApp {
+                match Self::decode_link_frame(decoded.payload.clone()) {
+                    Ok(link_frame) => Self::process_link_frame(link_frame, link_sender).await,
+                    Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
+                }
+            }
+        }
+    }
+
+    // Decode the LinkFrame
+    fn decode_link_frame(payload: Vec<u8>) -> Result<LinkFrame, prost::DecodeError> {
+        LinkFrame::decode(&*payload)
+    }
+
+    // Process the LinkFrame
+    async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
+        match link_frame.payload {
+            Some(Payload::Message(link_msg)) => {
+                if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
+                    error!("failed to send message: {}", err);
+                }
+            }
+            Some(Payload::Fragment(link_frag)) => {
+                Self::handle_fragment(link_frag);
+            }
+            None => {
+                warn!("LinkFrame payload is missing");
+            }
+        }
+    }
+
+    // Handle fragmented messages (stub for now)
+    fn handle_fragment(link_frag: LinkFrag) {
+        info!(
+            "Received fragment: id={}, index={}",
+            link_frag.id, link_frag.index
+        );
+        unimplemented!("message fragmentation unimplemented");
+    }
+
     fn start_client_listener(
         linkref: SerialLinkRef,
         mut client_receiver: mpsc::Receiver<LinkMessage>,
@@ -146,8 +198,24 @@ impl SerialLink {
             info!("client_listener starting");
             loop {
                 tokio::select! {
-                    Some(packet) = client_receiver.recv() => {
+                    Some(msg) = client_receiver.recv() => {
                         let mut link = linkref.lock().await;
+
+                        let link_message = LinkMsg {
+                            data: msg.data.clone(),
+                        };
+                        let link_frame = LinkFrame {
+                            magic: 0x48534F4E, // 'NOSH'
+                            version: 1,        // Protocol version
+                            payload: Some(Payload::Message(link_message)),
+                        };
+
+                        // Serialize the LinkFrame into bytes
+                        let mut buffer = Vec::new();
+                        if let Err(err) = link_frame.encode(&mut buffer) {
+                            error!("Failed to serialize LinkFrame: {:?}", err);
+                            continue;
+                        }
 
                         let mut router = LinkPacketRouter {
                             my_id: link.my_node_num.into(),
@@ -163,7 +231,7 @@ impl SerialLink {
                         if let Err(err) = link.stream_api
                             .send_mesh_packet(
                                 &mut router,
-                                packet.to_bytes().into(),
+                                buffer.into(),
                                 port_num,
                                 destination,
                                 channel,
@@ -197,31 +265,19 @@ impl MeshtasticLink for SerialLink {
     }
 }
 
-#[allow(dead_code)] // FIXME - remove this asap
-struct HandlerMetadata {
-    should_update_db: bool,
-}
-
 struct LinkPacketRouter {
     my_id: NodeId,
 }
 
-impl PacketRouter<HandlerMetadata, LinkError> for LinkPacketRouter {
-    fn handle_packet_from_radio(
-        &mut self,
-        packet: FromRadio,
-    ) -> Result<HandlerMetadata, LinkError> {
+impl PacketRouter<(), LinkError> for LinkPacketRouter {
+    fn handle_packet_from_radio(&mut self, packet: FromRadio) -> Result<(), LinkError> {
         dbg!(packet);
-        Ok(HandlerMetadata {
-            should_update_db: false,
-        })
+        Ok(())
     }
 
-    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<HandlerMetadata, LinkError> {
+    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<(), LinkError> {
         dbg!(packet);
-        Ok(HandlerMetadata {
-            should_update_db: false,
-        })
+        Ok(())
     }
 
     fn source_node_id(&self) -> NodeId {

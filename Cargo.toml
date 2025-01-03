@@ -2,17 +2,24 @@
 resolver = "2"
 members = [
     "noshtastic-app",
+    "noshtastic-bridge",
     "noshtastic-link",
     "noshtastic-sync",
 ]
 
 [workspace.dependencies]
+# local dependencies
+noshtastic-bridge = { path = "./noshtastic-bridge" }
 noshtastic-link = { path = "./noshtastic-link" }
 noshtastic-sync = { path = "./noshtastic-sync" }
 
 # common dependencies
+anyhow = "1.0"
 async-trait = "0.1.83"
+env_logger = "0.11"
+hex = "0.4"
 log = "0.4"
+nostrdb = "0.5"
 prost = "0.11"
 thiserror = "2.0"
 tokio = { version = "1.42", features = ["full"] }

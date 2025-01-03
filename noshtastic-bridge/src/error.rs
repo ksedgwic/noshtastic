@@ -6,36 +6,39 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum SyncError {
-    #[error("sync: invalid argument: {0}")]
+pub enum BridgeError {
+    #[error("bridge: invalid argument: {0}")]
     InvalidArgument(String),
 
-    #[error("sync: missing required parameter: {0}")]
+    #[error("bridge: missing required parameter: {0}")]
     MissingParameter(String),
 
-    #[error("sync: operation not allowed: {0}")]
+    #[error("bridge: operation not allowed: {0}")]
     OperationNotAllowed(String), // An action violates some policy or constraint
 
-    #[error("sync: internal error: {0}")]
+    #[error("bridge: internal error: {0}")]
     InternalError(String),
 
-    #[error("sync: link error: {0}")]
-    LinkError(#[from] noshtastic_link::LinkError),
+    #[error("bridge: enostr error: {0}")]
+    EnostrError(#[from] enostr::Error),
+
+    #[error("bridge: nostrdb error: {0}")]
+    NostrdbError(#[from] nostrdb::Error),
 }
 
-impl SyncError {
+impl BridgeError {
     pub fn invalid_argument<S: Into<String>>(msg: S) -> Self {
-        SyncError::InvalidArgument(msg.into())
+        BridgeError::InvalidArgument(msg.into())
     }
     pub fn missing_parameter<S: Into<String>>(msg: S) -> Self {
-        SyncError::MissingParameter(msg.into())
+        BridgeError::MissingParameter(msg.into())
     }
     pub fn operation_not_allowed<S: Into<String>>(msg: S) -> Self {
-        SyncError::OperationNotAllowed(msg.into())
+        BridgeError::OperationNotAllowed(msg.into())
     }
     pub fn internal_error<S: Into<String>>(msg: S) -> Self {
-        SyncError::InternalError(msg.into())
+        BridgeError::InternalError(msg.into())
     }
 }
 
-pub type SyncResult<T> = Result<T, SyncError>;
+pub type BridgeResult<T> = Result<T, BridgeError>;
