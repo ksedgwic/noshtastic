@@ -80,7 +80,8 @@ impl SerialLink {
 
         info!("opening serial link on {}", serial);
 
-        let serial_stream = utils::stream::build_serial_stream(serial.clone(), None, None, None)?;
+        let serial_stream = utils::stream::build_serial_stream(serial.clone(), None, None, None)
+            .expect("no radio found");
         let config_id = utils::generate_rand_id();
         let stream_api = StreamApi::new();
         let (packet_receiver, stream_api) = stream_api.connect(serial_stream).await;
