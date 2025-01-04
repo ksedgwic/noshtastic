@@ -5,26 +5,27 @@
 
 use async_trait::async_trait;
 use log::*;
-use meshtastic::api::{ConnectedStreamApi, StreamApi};
-use meshtastic::packet::{PacketDestination, PacketRouter};
-use meshtastic::protobufs::{from_radio, mesh_packet};
-use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
-use meshtastic::types::NodeId;
-use meshtastic::utils;
+use meshtastic::{
+    api::{ConnectedStreamApi, StreamApi},
+    packet::{PacketDestination, PacketRouter},
+    protobufs::{from_radio, mesh_packet, FromRadio, MeshPacket, PortNum},
+    types::NodeId,
+    utils,
+};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio;
-use tokio::sync::mpsc::{self, UnboundedReceiver};
-use tokio::sync::{Mutex, Notify};
-use tokio::task;
+use tokio::{
+    sync::{mpsc, Mutex, Notify},
+    task,
+    time::{sleep, Duration},
+};
 
 use crate::{
     LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
     Payload,
 };
 
-// The LINK_FRAG_THRESH can probably be tuned up a wee bit ...
 const LINK_FRAG_THRESH: usize = 200;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_VERSION: u32 = 1;
