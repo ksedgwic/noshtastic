@@ -12,6 +12,7 @@ use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
 use meshtastic::types::NodeId;
 use meshtastic::utils;
 use prost::Message;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
@@ -22,6 +23,11 @@ use crate::{
     LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
     Payload,
 };
+
+// The LINK_FRAG_THRESH can probably be tuned up a wee bit ...
+const LINK_FRAG_THRESH: usize = 200;
+const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
+const LINK_VERSION: u32 = 1;
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -167,7 +173,7 @@ impl SerialLink {
     // Process the LinkFrame
     async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
         match link_frame.payload {
-            Some(Payload::Message(link_msg)) => {
+            Some(Payload::Complete(link_msg)) => {
                 if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
                     error!("failed to send message: {}", err);
                 }
@@ -185,7 +191,7 @@ impl SerialLink {
     fn handle_fragment(link_frag: LinkFrag) {
         info!(
             "Received fragment: id={}, index={}",
-            link_frag.id, link_frag.index
+            link_frag.msgid, link_frag.fragndx
         );
         unimplemented!("message fragmentation unimplemented");
     }
@@ -200,7 +206,6 @@ impl SerialLink {
             loop {
                 tokio::select! {
                     Some(msg) = client_receiver.recv() => {
-                        debug!("saw LinkMessage, data sz: {}", msg.data.len() );
                         if let Err(err) = Self::send_link_message(linkref.clone(), msg).await {
                             error!("send failed: {:?}", err);
                         }
@@ -216,23 +221,52 @@ impl SerialLink {
     }
 
     async fn send_link_message(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        if msg.data.len() > 200 {
-            unimplemented!()
-            // Ok(Self::send_fragments(linkref, msg)?)
+        if msg.data.len() > LINK_FRAG_THRESH {
+            Ok(Self::send_fragments(linkref, msg).await?)
         } else {
             Ok(Self::send_complete(linkref, msg).await?)
         }
     }
 
     async fn send_complete(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let link_message = LinkMsg { data: msg.data };
+        let link_msg = LinkMsg { data: msg.data };
         let link_frame = LinkFrame {
-            magic: 0x48534F4E, // 'NOSH'
-            version: 1,        // Protocol version
-            payload: Some(Payload::Message(link_message)),
+            magic: LINK_MAGIC,
+            version: LINK_VERSION,
+            payload: Some(Payload::Complete(link_msg)),
         };
-
+        debug!("sending complete LinkMsg");
         Ok(Self::send_link_frame(linkref, link_frame).await?)
+    }
+
+    fn compute_message_id(data: &[u8]) -> u64 {
+        let hash = Sha256::digest(data);
+        let bytes = &hash[..8]; // Take the first 8 bytes
+        u64::from_be_bytes(bytes.try_into().expect("Slice has incorrect length"))
+    }
+
+    async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
+        let msgid = Self::compute_message_id(&msg.data);
+        let data = &msg.data;
+        let numfrag: u32 = ((msg.data.len() + (LINK_FRAG_THRESH - 1)) / LINK_FRAG_THRESH) as u32;
+        let mut fragndx: u32 = 0;
+        for chunk in data.chunks(LINK_FRAG_THRESH) {
+            let link_frag = LinkFrag {
+                msgid,
+                numfrag,
+                fragndx,
+                data: chunk.to_vec(),
+            };
+            let link_frame = LinkFrame {
+                magic: LINK_MAGIC,
+                version: LINK_VERSION,
+                payload: Some(Payload::Fragment(link_frag)),
+            };
+            debug!("sending LinkFrag {:016x}: {}/{}", msgid, fragndx, numfrag);
+            Self::send_link_frame(linkref.clone(), link_frame).await?;
+            fragndx += 1;
+        }
+        Ok(())
     }
 
     async fn send_link_frame(linkref: SerialLinkRef, frame: LinkFrame) -> LinkResult<()> {
