@@ -5,26 +5,27 @@
 
 use async_trait::async_trait;
 use log::*;
-use meshtastic::api::{ConnectedStreamApi, StreamApi};
-use meshtastic::packet::{PacketDestination, PacketRouter};
-use meshtastic::protobufs::{from_radio, mesh_packet};
-use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
-use meshtastic::types::NodeId;
-use meshtastic::utils;
+use meshtastic::{
+    api::{ConnectedStreamApi, StreamApi},
+    packet::{PacketDestination, PacketRouter},
+    protobufs::{from_radio, mesh_packet, FromRadio, MeshPacket, PortNum},
+    types::NodeId,
+    utils,
+};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio;
-use tokio::sync::mpsc::{self, UnboundedReceiver};
-use tokio::sync::{Mutex, Notify};
-use tokio::task;
+use tokio::{
+    sync::{mpsc, Mutex, Notify},
+    task,
+    time::{sleep, Duration},
+};
 
 use crate::{
     LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
     Payload,
 };
 
-// The LINK_FRAG_THRESH can probably be tuned up a wee bit ...
 const LINK_FRAG_THRESH: usize = 200;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_VERSION: u32 = 1;
@@ -114,7 +115,7 @@ impl SerialLink {
 
     fn start_mesh_listener(
         linkref: SerialLinkRef,
-        mut packet_receiver: UnboundedReceiver<FromRadio>,
+        mut packet_receiver: mpsc::UnboundedReceiver<FromRadio>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<mpsc::Receiver<LinkMessage>> {
         let (link_sender, link_receiver) = mpsc::channel::<LinkMessage>(100);
@@ -167,6 +168,7 @@ impl SerialLink {
 
     // Decode the LinkFrame
     fn decode_link_frame(payload: Vec<u8>) -> Result<LinkFrame, prost::DecodeError> {
+        debug!("received LinkFrame, encoded sz: {}", payload.len());
         LinkFrame::decode(&*payload)
     }
 
@@ -174,9 +176,7 @@ impl SerialLink {
     async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
         match link_frame.payload {
             Some(Payload::Complete(link_msg)) => {
-                if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
-                    error!("failed to send message: {}", err);
-                }
+                Self::handle_complete(link_msg, link_sender).await;
             }
             Some(Payload::Fragment(link_frag)) => {
                 Self::handle_fragment(link_frag);
@@ -187,13 +187,26 @@ impl SerialLink {
         }
     }
 
-    // Handle fragmented messages (stub for now)
-    fn handle_fragment(link_frag: LinkFrag) {
-        info!(
-            "Received fragment: id={}, index={}",
-            link_frag.msgid, link_frag.fragndx
+    // Handle unfragmented messages
+    async fn handle_complete(linkmsg: LinkMsg, link_sender: &mpsc::Sender<LinkMessage>) {
+        debug!(
+            "received complete LinkMsg w/ payload sz: {}",
+            linkmsg.data.len()
         );
-        unimplemented!("message fragmentation unimplemented");
+        if let Err(err) = link_sender.send(LinkMessage::from(linkmsg)).await {
+            error!("failed to send message: {}", err);
+        }
+    }
+
+    // Handle fragmented messages (stub for now)
+    fn handle_fragment(frag: LinkFrag) {
+        debug!(
+            "received LinkFrag {:016x}: {}/{} payload sz: {}",
+            frag.msgid,
+            frag.fragndx,
+            frag.numfrag,
+            frag.data.len()
+        );
     }
 
     fn start_client_listener(
@@ -229,13 +242,15 @@ impl SerialLink {
     }
 
     async fn send_complete(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let link_msg = LinkMsg { data: msg.data };
+        let link_msg = LinkMsg {
+            data: msg.data.clone(),
+        };
         let link_frame = LinkFrame {
             magic: LINK_MAGIC,
             version: LINK_VERSION,
             payload: Some(Payload::Complete(link_msg)),
         };
-        debug!("sending complete LinkMsg");
+        debug!("sending complete LinkMsg w/ payload sz: {}", msg.data.len());
         Self::send_link_frame(linkref, link_frame).await
     }
 
@@ -261,7 +276,13 @@ impl SerialLink {
                 version: LINK_VERSION,
                 payload: Some(Payload::Fragment(link_frag)),
             };
-            debug!("sending LinkFrag {:016x}: {}/{}", msgid, fragndx, numfrag);
+            debug!(
+                "sending LinkFrag {:016x}: {}/{} payload sz: {}",
+                msgid,
+                fragndx,
+                numfrag,
+                chunk.len()
+            );
             Self::send_link_frame(linkref.clone(), link_frame).await?;
         }
         Ok(())
@@ -276,7 +297,7 @@ impl SerialLink {
 
         let mut link = linkref.lock().await;
 
-        debug!("sending LinkFrame, sz: {}", buffer.len());
+        debug!("sending LinkFrame, encoded sz: {}", buffer.len());
         let mut router = LinkPacketRouter {
             my_id: link.my_node_num.into(),
         };
@@ -284,7 +305,7 @@ impl SerialLink {
         let destination = PacketDestination::Broadcast;
         let channel = 0.into();
         let want_ack = false;
-        let want_response = true;
+        let want_response = false;
         let echo_response = false;
         let reply_id: Option<u32> = None;
         let emoji: Option<u32> = None;
@@ -306,6 +327,9 @@ impl SerialLink {
         {
             error!("send_mesh_packet failed {:?}", err);
         }
+
+        // don't send packets back to back
+        sleep(Duration::from_secs(2)).await;
 
         Ok(())
     }
