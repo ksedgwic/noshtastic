@@ -14,7 +14,12 @@ use meshtastic::{
 };
 use prost::Message;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     sync::{mpsc, Mutex, Notify},
     task,
@@ -55,7 +60,6 @@ struct PartialMsg {
     frags: Vec<Vec<u8>>, // missing fragments are zero-sized
 }
 
-#[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
 struct FragmentCache {
     partials: BTreeMap<MsgId, PartialMsg>,
@@ -67,6 +71,50 @@ impl FragmentCache {
             partials: BTreeMap::new(),
         }
     }
+
+    fn add_fragment(&mut self, frag: &LinkFrag) -> Option<LinkMsg> {
+        // Retrieve or create a new PartialMsg
+        let partial = self.partials.entry(MsgId(frag.msgid)).or_insert_with(|| {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs();
+            let frags = vec![Vec::new(); frag.numfrag as usize];
+            PartialMsg {
+                created: timestamp,
+                retried: timestamp,
+                frags,
+            }
+        });
+
+        // Update the fragment
+        if frag.fragndx < partial.frags.len() as u32 {
+            partial.frags[frag.fragndx as usize] = frag.data.clone();
+        } else {
+            error!("invalid fragment index: {}", frag.fragndx);
+            return None; // Invalid fragment index
+        }
+
+        // Check if all fragments are present
+        if partial.frags.iter().all(|f| !f.is_empty()) {
+            // Assemble the complete message
+            let mut complete_data = Vec::new();
+            for fragment in &partial.frags {
+                complete_data.extend_from_slice(fragment);
+            }
+
+            // Remove the completed partial message
+            self.partials.remove(&MsgId(frag.msgid));
+
+            // Return the complete LinkMsg
+            return Some(LinkMsg {
+                data: complete_data,
+            });
+        }
+
+        // Return None if the message is not yet complete
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -75,7 +123,7 @@ pub struct SerialLink {
     client_sender: mpsc::Sender<LinkMessage>,
     _stop_signal: Arc<Notify>,
     my_node_num: u32,
-    _fragcache: FragmentCache,
+    fragcache: FragmentCache,
 }
 pub type SerialLinkRef = Arc<tokio::sync::Mutex<SerialLink>>;
 
@@ -90,7 +138,7 @@ impl SerialLink {
             client_sender,
             _stop_signal: stop_signal,
             my_node_num: 0,
-            _fragcache: FragmentCache::new(),
+            fragcache: FragmentCache::new(),
         }
     }
 
@@ -187,19 +235,25 @@ impl SerialLink {
                 linkref.lock().await.set_my_node_num(myinfo.my_node_num);
             }
             Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
-                Self::handle_mesh_packet(mesh_packet, link_sender).await;
+                Self::handle_mesh_packet(linkref, mesh_packet, link_sender).await;
             }
             _ => {} // Ignore other variants
         }
     }
 
     // Handle mesh packets
-    async fn handle_mesh_packet(mesh_packet: MeshPacket, link_sender: &mpsc::Sender<LinkMessage>) {
+    async fn handle_mesh_packet(
+        linkref: &SerialLinkRef,
+        mesh_packet: MeshPacket,
+        link_sender: &mpsc::Sender<LinkMessage>,
+    ) {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
         {
             if decoded.portnum() == PortNum::PrivateApp {
                 match Self::decode_link_frame(decoded.payload.clone()) {
-                    Ok(link_frame) => Self::process_link_frame(link_frame, link_sender).await,
+                    Ok(link_frame) => {
+                        Self::process_link_frame(linkref, link_frame, link_sender).await
+                    }
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
                 }
             }
@@ -213,13 +267,17 @@ impl SerialLink {
     }
 
     // Process the LinkFrame
-    async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
+    async fn process_link_frame(
+        linkref: &SerialLinkRef,
+        link_frame: LinkFrame,
+        link_sender: &mpsc::Sender<LinkMessage>,
+    ) {
         match link_frame.payload {
             Some(Payload::Complete(link_msg)) => {
                 Self::handle_complete(link_msg, link_sender).await;
             }
             Some(Payload::Fragment(link_frag)) => {
-                Self::handle_fragment(link_frag);
+                Self::handle_fragment(linkref, link_frag, link_sender).await;
             }
             None => {
                 warn!("LinkFrame payload is missing");
@@ -239,7 +297,11 @@ impl SerialLink {
     }
 
     // Handle fragmented messages (stub for now)
-    fn handle_fragment(frag: LinkFrag) {
+    async fn handle_fragment(
+        linkref: &SerialLinkRef,
+        frag: LinkFrag,
+        link_sender: &mpsc::Sender<LinkMessage>,
+    ) {
         debug!(
             "received LinkFrag {}: {}/{} payload sz: {}",
             MsgId(frag.msgid),
@@ -247,6 +309,12 @@ impl SerialLink {
             frag.numfrag,
             frag.data.len()
         );
+        if let Some(linkmsg) = linkref.lock().await.fragcache.add_fragment(&frag) {
+            debug!("completed LinkFrag {}", MsgId(frag.msgid));
+            if let Err(err) = link_sender.send(LinkMessage::from(linkmsg)).await {
+                error!("failed to send message: {}", err);
+            }
+        }
     }
 
     fn start_client_listener(
