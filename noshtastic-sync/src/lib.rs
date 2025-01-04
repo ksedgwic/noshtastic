@@ -122,7 +122,7 @@ impl Sync {
     }
 
     fn handle_sync_message(syncref: SyncRef, message: SyncMessage) {
-        let _sync = syncref.lock().unwrap();
+        let sync = syncref.lock().unwrap();
         match message.payload {
             Some(Payload::Ping(ping)) => {
                 info!("received Ping id: {}", ping.id);
@@ -137,12 +137,22 @@ impl Sync {
             }
             Some(Payload::RawNote(raw_note)) => {
                 info!("received RawNote sz: {}", raw_note.data.len());
+                sync.handle_raw_note(raw_note);
             }
             None => {
                 warn!("received SyncMessage with no payload");
             }
         }
     }
+
+    fn handle_raw_note(&self, raw_note: RawNote) {
+        if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
+            debug!("saw RawNote: {}", utf8_str);
+        } else {
+            debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
+        }
+    }
+
     pub fn after_delay<F, T>(syncref: Arc<Mutex<T>>, delay: Duration, task: F)
     where
         F: FnOnce(&mut T) + Send + 'static,
