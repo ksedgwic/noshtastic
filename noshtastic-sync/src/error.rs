@@ -21,6 +21,9 @@ pub enum SyncError {
 
     #[error("sync: link error: {0}")]
     LinkError(#[from] noshtastic_link::LinkError),
+
+    #[error("sync: nostrdb error: {0}")]
+    NostrdbError(#[from] nostrdb::Error),
 }
 
 impl SyncError {

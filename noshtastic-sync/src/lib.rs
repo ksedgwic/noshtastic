@@ -4,7 +4,10 @@
 // or <https://www.gnu.org/licenses/> for details.
 
 use log::*;
+use nostrdb::Filter;
 use nostrdb::Ndb;
+use nostrdb::NoteKey;
+use nostrdb::Transaction;
 use prost::Message;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -17,9 +20,8 @@ pub mod proto {
     include!("../protos/noshtastic_sync.rs");
 }
 pub use proto::sync_message::Payload;
-pub use proto::Ping;
-pub use proto::Pong;
 pub use proto::SyncMessage;
+pub use proto::{Ping, Pong, RawNote};
 
 pub mod error;
 pub use error::*;
@@ -28,25 +30,82 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Sync {
-    _ndb: Ndb,
+    ndb: Ndb,
     linkref: LinkRef,
     ping_duration: Option<Duration>, // None means no pinging
+    max_notes: u32,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
     pub fn new(
-        _ndb: Ndb,
+        ndb: Ndb,
         linkref: LinkRef,
         receiver: mpsc::Receiver<LinkMessage>,
     ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
-            _ndb,
+            ndb: ndb.clone(),
             linkref,
             ping_duration: None,
+            max_notes: 100,
         }));
         Self::start_message_handler(receiver, syncref.clone());
+        Self::start_local_subscription(syncref.clone())?;
         Ok(syncref)
+    }
+
+    fn start_local_subscription(syncref: SyncRef) -> SyncResult<()> {
+        let sync = syncref.lock().unwrap();
+        let filter = Filter::new()
+            .kinds([1])
+            .limit(sync.max_notes as u64)
+            .build();
+        let ndbsubid = sync.ndb.subscribe(&[filter.clone()])?;
+
+        let syncref_clone = syncref.clone();
+        let ndb_clone = sync.ndb.clone();
+        let max_notes = sync.max_notes;
+        task::spawn(async move {
+            debug!("local subscription starting");
+            loop {
+                trace!("waiting on local subscription");
+                match ndb_clone.wait_for_notes(ndbsubid, max_notes).await {
+                    Ok(notekeys) => {
+                        info!("saw notekeys: {:?}", notekeys);
+                        let sync = syncref_clone.lock().unwrap();
+                        for notekey in notekeys {
+                            if let Err(err) = sync.relay_notekey(notekey) {
+                                error!("Error in relay_note: {:?}", err);
+                                // keep going for now
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        error!("Error waiting for notes: {:?}", err);
+                        // keep going for now
+                    }
+                }
+            }
+            #[allow(unreachable_code)]
+            {
+                debug!("local subscription finished");
+            }
+        });
+
+        Ok(())
+    }
+
+    fn relay_notekey(&self, notekey: NoteKey) -> SyncResult<()> {
+        let txn = Transaction::new(&self.ndb).expect("txn");
+        match self.ndb.get_note_by_key(&txn, notekey) {
+            Ok(note) => {
+                let note_json = note.json()?;
+                dbg!(&note_json);
+                self.send_raw_note(&*note_json)?;
+            }
+            Err(err) => error!("error in get_note_by_key: {:?}", err),
+        }
+        Ok(())
     }
 
     fn start_message_handler(mut receiver: mpsc::Receiver<LinkMessage>, syncref: SyncRef) {
@@ -66,7 +125,7 @@ impl Sync {
         let _sync = syncref.lock().unwrap();
         match message.payload {
             Some(Payload::Ping(ping)) => {
-                info!("received ping id: {}", ping.id);
+                info!("received Ping id: {}", ping.id);
                 Sync::after_delay(syncref.clone(), Duration::from_secs(1), move |sync| {
                     if let Err(err) = sync.send_pong(ping.id) {
                         error!("trouble sending pong: {:?}", err);
@@ -74,7 +133,10 @@ impl Sync {
                 })
             }
             Some(Payload::Pong(pong)) => {
-                info!("received pong id: {}", pong.id);
+                info!("received Pong id: {}", pong.id);
+            }
+            Some(Payload::RawNote(raw_note)) => {
+                info!("received RawNote sz: {}", raw_note.data.len());
             }
             None => {
                 warn!("received SyncMessage with no payload");
@@ -123,13 +185,21 @@ impl Sync {
         Ok(())
     }
 
+    fn send_raw_note(&self, eventbuf: &str) -> SyncResult<()> {
+        info!("sending RawNote sz: {}", eventbuf.len());
+        let raw_note = Payload::RawNote(RawNote {
+            data: eventbuf.as_bytes().to_vec(),
+        });
+        self.send_message(Some(raw_note))
+    }
+
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
-        info!("sending ping id: {}", ping_id);
+        info!("sending Ping id: {}", ping_id);
         self.send_message(Some(Payload::Ping(Ping { id: ping_id })))
     }
 
     fn send_pong(&self, pong_id: u32) -> SyncResult<()> {
-        info!("sending pong id: {}", pong_id);
+        info!("sending Pong id: {}", pong_id);
         self.send_message(Some(Payload::Pong(Pong { id: pong_id })))
     }
 

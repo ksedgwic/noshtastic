@@ -40,6 +40,7 @@ impl Bridge {
     pub fn start(&mut self) -> BridgeResult<()> {
         if self.opt_relay_url.is_none() || self.opt_filter_json.is_none() {
             info!("bridge not configured, skipping");
+            return Ok(());
         }
         let relay_url = self.opt_relay_url.as_ref().unwrap().clone();
         let filter_json = &self.opt_filter_json.as_ref().unwrap().clone();
