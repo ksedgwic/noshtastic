@@ -17,9 +17,9 @@ use std::path::Path;
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 
-use noshtastic_bridge::Bridge;
 use noshtastic_link::create_link;
 use noshtastic_sync::Sync;
+use noshtastic_testgw::TestGW;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -43,17 +43,17 @@ struct Args {
 
     #[arg(
         short = 'r',
-        long = "bridge-relay",
-        help = "The nostr relay address to bridge, optional"
+        long = "testgw-relay",
+        help = "The nostr relay address to use for ingesting test notes, optional"
     )]
-    bridge_relay: Option<String>,
+    testgw_relay: Option<String>,
 
     #[arg(
         short = 'f',
-        long = "bridge-filter",
-        help = "The nostr filter to bridge, optional"
+        long = "testgw-filter",
+        help = "The nostr filter to use for ingesting test notes, optional"
     )]
-    bridge_filter: Option<String>,
+    testgw_filter: Option<String>,
 
     #[arg(long = "enable-ping", help = "Enable periodic pings")]
     enable_ping: bool,
@@ -120,11 +120,11 @@ async fn main() -> Result<()> {
     init_logger();
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
-    let mut bridge = Bridge::new(ndb.clone(), &args.bridge_relay, &args.bridge_filter)?;
+    let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
     let (linkref, receiver) = create_link(&args.serial).await?;
     let syncref = Sync::new(ndb.clone(), linkref, receiver)?;
 
-    bridge.start()?;
+    testgw.start()?;
     if args.enable_ping {
         // give the config a chance to settle before pinging
         sleep(Duration::from_secs(5)).await;
@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     if args.enable_ping {
         syncref.lock().unwrap().stop_pinging()?;
     }
-    bridge.stop()?;
+    testgw.stop()?;
 
     Ok(())
 }

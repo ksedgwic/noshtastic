@@ -1583,27 +1583,12 @@ dependencies = [
  "directories-next",
  "env_logger",
  "log",
- "noshtastic-bridge",
  "noshtastic-link",
  "noshtastic-sync",
+ "noshtastic-testgw",
  "nostrdb",
  "rustls",
  "tokio",
-]
-
-[[package]]
-name = "noshtastic-bridge"
-version = "0.1.0"
-dependencies = [
- "enostr",
- "env_logger",
- "hex",
- "log",
- "nostrdb",
- "once_cell",
- "thiserror 2.0.9",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -1634,6 +1619,21 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-build",
+]
+
+[[package]]
+name = "noshtastic-testgw"
+version = "0.1.0"
+dependencies = [
+ "enostr",
+ "env_logger",
+ "hex",
+ "log",
+ "nostrdb",
+ "once_cell",
+ "thiserror 2.0.9",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

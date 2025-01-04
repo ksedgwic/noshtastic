@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub mod error;
 pub use error::*;
 
-pub struct Bridge {
+pub struct TestGW {
     ndb: Ndb,
     opt_relay_url: Option<String>,
     #[allow(dead_code)] // FIXME - remove this
@@ -22,14 +22,14 @@ pub struct Bridge {
     poolref: Arc<Mutex<RelayPool>>,
 }
 
-impl Bridge {
+impl TestGW {
     pub fn new(
         ndb: Ndb,
         opt_relay_url: &Option<String>,
         opt_filter_json: &Option<String>,
-    ) -> BridgeResult<Self> {
+    ) -> TestGWResult<Self> {
         let poolref = Arc::new(Mutex::new(RelayPool::new()));
-        Ok(Bridge {
+        Ok(TestGW {
             ndb,
             opt_relay_url: opt_relay_url.clone(),
             opt_filter_json: opt_filter_json.clone(),
@@ -37,9 +37,9 @@ impl Bridge {
         })
     }
 
-    pub fn start(&mut self) -> BridgeResult<()> {
+    pub fn start(&mut self) -> TestGWResult<()> {
         if self.opt_relay_url.is_none() || self.opt_filter_json.is_none() {
-            info!("bridge not configured, skipping");
+            info!("testgw not configured, skipping");
             return Ok(());
         }
         let relay_url = self.opt_relay_url.as_ref().unwrap().clone();
@@ -69,7 +69,7 @@ impl Bridge {
         };
 
         let mut pool = self.poolref.lock().unwrap();
-        info!("bridge to {} starting", relay_url);
+        info!("testgw to {} starting", relay_url);
         pool.add_url(relay_url.clone(), handle_pool_event)?;
         let subid = Uuid::new_v4().to_string();
         let filter = Filter::from_json(filter_json)?;
@@ -77,10 +77,10 @@ impl Bridge {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> BridgeResult<()> {
+    pub fn stop(&mut self) -> TestGWResult<()> {
         if self.opt_relay_url.is_some() && self.opt_filter_json.is_some() {
             info!(
-                "bridge to {} stopping",
+                "testgw to {} stopping",
                 self.opt_relay_url.as_ref().unwrap()
             );
         }
