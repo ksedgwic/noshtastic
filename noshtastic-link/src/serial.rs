@@ -115,7 +115,7 @@ impl SerialLink {
 
     fn start_mesh_listener(
         linkref: SerialLinkRef,
-        mut packet_receiver: UnboundedReceiver<FromRadio>,
+        mut packet_receiver: mpsc::UnboundedReceiver<FromRadio>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<mpsc::Receiver<LinkMessage>> {
         let (link_sender, link_receiver) = mpsc::channel::<LinkMessage>(100);
@@ -168,6 +168,7 @@ impl SerialLink {
 
     // Decode the LinkFrame
     fn decode_link_frame(payload: Vec<u8>) -> Result<LinkFrame, prost::DecodeError> {
+        debug!("received LinkFrame, encoded sz: {}", payload.len());
         LinkFrame::decode(&*payload)
     }
 
@@ -175,9 +176,7 @@ impl SerialLink {
     async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
         match link_frame.payload {
             Some(Payload::Complete(link_msg)) => {
-                if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
-                    error!("failed to send message: {}", err);
-                }
+                Self::handle_complete(link_msg, link_sender).await;
             }
             Some(Payload::Fragment(link_frag)) => {
                 Self::handle_fragment(link_frag);
@@ -188,13 +187,26 @@ impl SerialLink {
         }
     }
 
-    // Handle fragmented messages (stub for now)
-    fn handle_fragment(link_frag: LinkFrag) {
-        info!(
-            "Received fragment: id={}, index={}",
-            link_frag.msgid, link_frag.fragndx
+    // Handle unfragmented messages
+    async fn handle_complete(linkmsg: LinkMsg, link_sender: &mpsc::Sender<LinkMessage>) {
+        debug!(
+            "received complete LinkMsg w/ payload sz: {}",
+            linkmsg.data.len()
         );
-        unimplemented!("message fragmentation unimplemented");
+        if let Err(err) = link_sender.send(LinkMessage::from(linkmsg)).await {
+            error!("failed to send message: {}", err);
+        }
+    }
+
+    // Handle fragmented messages (stub for now)
+    fn handle_fragment(frag: LinkFrag) {
+        debug!(
+            "received LinkFrag {:016x}: {}/{} payload sz: {}",
+            frag.msgid,
+            frag.fragndx,
+            frag.numfrag,
+            frag.data.len()
+        );
     }
 
     fn start_client_listener(
@@ -230,13 +242,15 @@ impl SerialLink {
     }
 
     async fn send_complete(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let link_msg = LinkMsg { data: msg.data };
+        let link_msg = LinkMsg {
+            data: msg.data.clone(),
+        };
         let link_frame = LinkFrame {
             magic: LINK_MAGIC,
             version: LINK_VERSION,
             payload: Some(Payload::Complete(link_msg)),
         };
-        debug!("sending complete LinkMsg");
+        debug!("sending complete LinkMsg w/ payload sz: {}", msg.data.len());
         Self::send_link_frame(linkref, link_frame).await
     }
 
@@ -262,7 +276,13 @@ impl SerialLink {
                 version: LINK_VERSION,
                 payload: Some(Payload::Fragment(link_frag)),
             };
-            debug!("sending LinkFrag {:016x}: {}/{}", msgid, fragndx, numfrag);
+            debug!(
+                "sending LinkFrag {:016x}: {}/{} payload sz: {}",
+                msgid,
+                fragndx,
+                numfrag,
+                chunk.len()
+            );
             Self::send_link_frame(linkref.clone(), link_frame).await?;
         }
         Ok(())
@@ -277,7 +297,7 @@ impl SerialLink {
 
         let mut link = linkref.lock().await;
 
-        debug!("sending LinkFrame, sz: {}", buffer.len());
+        debug!("sending LinkFrame, encoded sz: {}", buffer.len());
         let mut router = LinkPacketRouter {
             my_id: link.my_node_num.into(),
         };
