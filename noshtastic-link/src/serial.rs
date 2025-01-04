@@ -284,7 +284,7 @@ impl SerialLink {
         let destination = PacketDestination::Broadcast;
         let channel = 0.into();
         let want_ack = false;
-        let want_response = true;
+        let want_response = false;
         let echo_response = false;
         let reply_id: Option<u32> = None;
         let emoji: Option<u32> = None;
