@@ -54,6 +54,9 @@ struct Args {
         help = "The nostr filter to bridge, optional"
     )]
     bridge_filter: Option<String>,
+
+    #[arg(long = "enable-ping", help = "Enable periodic pings")]
+    enable_ping: bool,
 }
 
 fn default_data_dir() -> String {
@@ -122,11 +125,11 @@ async fn main() -> Result<()> {
     let syncref = Sync::new(ndb.clone(), linkref, receiver)?;
 
     bridge.start()?;
-
-    // give the config a chance to settle before pinging
-    sleep(Duration::from_secs(5)).await;
-
-    Sync::start_pinging(syncref.clone(), Duration::from_secs(30))?;
+    if args.enable_ping {
+        // give the config a chance to settle before pinging
+        sleep(Duration::from_secs(5)).await;
+        Sync::start_pinging(syncref.clone(), Duration::from_secs(30))?;
+    }
 
     // wait for termination signal
     info!("waiting for ^C to terminate ...");
@@ -136,7 +139,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    syncref.lock().unwrap().stop_pinging()?;
+    if args.enable_ping {
+        syncref.lock().unwrap().stop_pinging()?;
+    }
     bridge.stop()?;
 
     Ok(())
