@@ -308,6 +308,9 @@ impl SerialLink {
             error!("send_mesh_packet failed {:?}", err);
         }
 
+        // don't send packets back to back
+        sleep(Duration::from_secs(2)).await;
+
         Ok(())
     }
 }
