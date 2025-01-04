@@ -12,6 +12,7 @@ use meshtastic::protobufs::{FromRadio, MeshPacket, PortNum};
 use meshtastic::types::NodeId;
 use meshtastic::utils;
 use prost::Message;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use tokio;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
@@ -22,6 +23,11 @@ use crate::{
     LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult, MeshtasticLink,
     Payload,
 };
+
+// The LINK_FRAG_THRESH can probably be tuned up a wee bit ...
+const LINK_FRAG_THRESH: usize = 200;
+const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
+const LINK_VERSION: u32 = 1;
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -80,7 +86,8 @@ impl SerialLink {
 
         info!("opening serial link on {}", serial);
 
-        let serial_stream = utils::stream::build_serial_stream(serial.clone(), None, None, None)?;
+        let serial_stream = utils::stream::build_serial_stream(serial.clone(), None, None, None)
+            .expect("no radio found");
         let config_id = utils::generate_rand_id();
         let stream_api = StreamApi::new();
         let (packet_receiver, stream_api) = stream_api.connect(serial_stream).await;
@@ -166,7 +173,7 @@ impl SerialLink {
     // Process the LinkFrame
     async fn process_link_frame(link_frame: LinkFrame, link_sender: &mpsc::Sender<LinkMessage>) {
         match link_frame.payload {
-            Some(Payload::Message(link_msg)) => {
+            Some(Payload::Complete(link_msg)) => {
                 if let Err(err) = link_sender.send(LinkMessage::from(link_msg)).await {
                     error!("failed to send message: {}", err);
                 }
@@ -184,7 +191,7 @@ impl SerialLink {
     fn handle_fragment(link_frag: LinkFrag) {
         info!(
             "Received fragment: id={}, index={}",
-            link_frag.id, link_frag.index
+            link_frag.msgid, link_frag.fragndx
         );
         unimplemented!("message fragmentation unimplemented");
     }
@@ -199,51 +206,8 @@ impl SerialLink {
             loop {
                 tokio::select! {
                     Some(msg) = client_receiver.recv() => {
-                        let mut link = linkref.lock().await;
-
-                        let link_message = LinkMsg {
-                            data: msg.data.clone(),
-                        };
-                        let link_frame = LinkFrame {
-                            magic: 0x48534F4E, // 'NOSH'
-                            version: 1,        // Protocol version
-                            payload: Some(Payload::Message(link_message)),
-                        };
-
-                        // Serialize the LinkFrame into bytes
-                        let mut buffer = Vec::new();
-                        if let Err(err) = link_frame.encode(&mut buffer) {
-                            error!("Failed to serialize LinkFrame: {:?}", err);
-                            continue;
-                        }
-
-                        let mut router = LinkPacketRouter {
-                            my_id: link.my_node_num.into(),
-                        };
-                        let port_num = PortNum::PrivateApp;
-                        let destination = PacketDestination::Broadcast;
-                        let channel = 0.into();
-                        let want_ack = false;
-                        let want_response = true;
-                        let echo_response = false;
-                        let reply_id: Option<u32> = None;
-                        let emoji: Option<u32> = None;
-                        if let Err(err) = link.stream_api
-                            .send_mesh_packet(
-                                &mut router,
-                                buffer.into(),
-                                port_num,
-                                destination,
-                                channel,
-                                want_ack,
-                                want_response,
-                                echo_response,
-                                reply_id,
-                                emoji,
-                            )
-                            .await
-                        {
-                            error!("send_mesh_packet failed {:?}", err);
+                        if let Err(err) = Self::send_link_message(linkref.clone(), msg).await {
+                            error!("send failed: {:?}", err);
                         }
                     },
                     _ = stop_signal.notified() => {
@@ -253,6 +217,96 @@ impl SerialLink {
             }
             info!("client_listener finished");
         });
+        Ok(())
+    }
+
+    async fn send_link_message(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
+        if msg.data.len() > LINK_FRAG_THRESH {
+            Ok(Self::send_fragments(linkref, msg).await?)
+        } else {
+            Ok(Self::send_complete(linkref, msg).await?)
+        }
+    }
+
+    async fn send_complete(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
+        let link_msg = LinkMsg { data: msg.data };
+        let link_frame = LinkFrame {
+            magic: LINK_MAGIC,
+            version: LINK_VERSION,
+            payload: Some(Payload::Complete(link_msg)),
+        };
+        debug!("sending complete LinkMsg");
+        Self::send_link_frame(linkref, link_frame).await
+    }
+
+    fn compute_message_id(data: &[u8]) -> u64 {
+        let hash = Sha256::digest(data);
+        let bytes = &hash[..8]; // Take the first 8 bytes
+        u64::from_be_bytes(bytes.try_into().expect("Slice has incorrect length"))
+    }
+
+    async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
+        let msgid = Self::compute_message_id(&msg.data);
+        let data = &msg.data;
+        let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
+        for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
+            let link_frag = LinkFrag {
+                msgid,
+                numfrag,
+                fragndx,
+                data: chunk.to_vec(),
+            };
+            let link_frame = LinkFrame {
+                magic: LINK_MAGIC,
+                version: LINK_VERSION,
+                payload: Some(Payload::Fragment(link_frag)),
+            };
+            debug!("sending LinkFrag {:016x}: {}/{}", msgid, fragndx, numfrag);
+            Self::send_link_frame(linkref.clone(), link_frame).await?;
+        }
+        Ok(())
+    }
+
+    async fn send_link_frame(linkref: SerialLinkRef, frame: LinkFrame) -> LinkResult<()> {
+        // Serialize the LinkFrame into bytes
+        let mut buffer = Vec::new();
+        frame.encode(&mut buffer).map_err(|err| {
+            LinkError::internal_error(format!("send_link_message: encode error: {:?}", err))
+        })?;
+
+        let mut link = linkref.lock().await;
+
+        debug!("sending LinkFrame, sz: {}", buffer.len());
+        let mut router = LinkPacketRouter {
+            my_id: link.my_node_num.into(),
+        };
+        let port_num = PortNum::PrivateApp;
+        let destination = PacketDestination::Broadcast;
+        let channel = 0.into();
+        let want_ack = false;
+        let want_response = true;
+        let echo_response = false;
+        let reply_id: Option<u32> = None;
+        let emoji: Option<u32> = None;
+        if let Err(err) = link
+            .stream_api
+            .send_mesh_packet(
+                &mut router,
+                buffer.into(),
+                port_num,
+                destination,
+                channel,
+                want_ack,
+                want_response,
+                echo_response,
+                reply_id,
+                emoji,
+            )
+            .await
+        {
+            error!("send_mesh_packet failed {:?}", err);
+        }
+
         Ok(())
     }
 }

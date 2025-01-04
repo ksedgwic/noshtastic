@@ -7,9 +7,9 @@ edition = "2021"
 
 [dependencies]
 # local dependencies
-noshtastic-bridge = { workspace = true }
 noshtastic-link = { workspace = true }
 noshtastic-sync = { workspace = true }
+noshtastic-testgw = { workspace = true }
 
 # common dependencies
 anyhow = { workspace = true }

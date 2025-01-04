@@ -7,7 +7,7 @@ message LinkFrame {
   fixed32 magic = 1; // 'NOSH'
   uint32 version = 2;
   oneof payload {
-    LinkMsg message = 3;	// A complete, unfragmented message
+    LinkMsg complete = 3;	// A complete, unfragmented message
     LinkFrag fragment = 4;	// A fragment of a message
   }
 }
@@ -19,8 +19,8 @@ message LinkMsg {
 
 // A fragment of a link message
 message LinkFrag {
-  fixed64 id = 1;	// Unique identifier for the fragmented packet
-  uint32 total = 2;     // Total number of fragments in the packet
-  uint32 index = 3;	// Index of this fragment (starting at 0)
+  fixed64 msgid = 1;	// Unique identifier for the message, common to the fragments
+  uint32 numfrag = 2;   // Total number of fragments in the packet
+  uint32 fragndx = 3;	// Index of this fragment (starting at 0)
   bytes data = 4;	// Raw data buffer for this fragment
 }

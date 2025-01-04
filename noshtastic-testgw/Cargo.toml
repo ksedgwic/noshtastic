@@ -1,6 +1,6 @@
 [package]
-name = "noshtastic-bridge"
-description = "Bridges packets to and from nostr relays."
+name = "noshtastic-testgw"
+description = "Ingests test packets from a standard nostr relay."
 version = "0.1.0"
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 
 # unique dependencies
-enostr = { git = "https://github.com/damus-io/notedeck.git", subdir = "crates/enostr", branch = "master" }
+enostr = { git = "https://github.com/damus-io/notedeck.git", rev = "eeab1666e7e8e868438a69024e9cb99f15f8713a" }
 uuid = { version = "1.11", features = ["v4"] }
 
 [dev-dependencies]

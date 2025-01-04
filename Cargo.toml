@@ -2,16 +2,16 @@
 resolver = "2"
 members = [
     "noshtastic-app",
-    "noshtastic-bridge",
     "noshtastic-link",
     "noshtastic-sync",
+    "noshtastic-testgw",
 ]
 
 [workspace.dependencies]
 # local dependencies
-noshtastic-bridge = { path = "./noshtastic-bridge" }
 noshtastic-link = { path = "./noshtastic-link" }
 noshtastic-sync = { path = "./noshtastic-sync" }
+noshtastic-testgw = { path = "./noshtastic-testgw" }
 
 # common dependencies
 anyhow = "1.0"
