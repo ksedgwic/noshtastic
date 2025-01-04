@@ -14,7 +14,7 @@ use meshtastic::{
 };
 use prost::Message;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::{collections::BTreeMap, fmt, sync::Arc};
 use tokio::{
     sync::{mpsc, Mutex, Notify},
     task,
@@ -26,17 +26,56 @@ use crate::{
     Payload,
 };
 
-const LINK_FRAG_THRESH: usize = 200;
-const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_VERSION: u32 = 1;
+const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
+const LINK_FRAG_THRESH: usize = 200;
+
+// Fragments share a common MsgId which is derived from a hash
+// of the whole message.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct MsgId(u64);
+
+impl fmt::Display for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
+impl fmt::Debug for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MsgId({:016x})", self.0)
+    }
+}
 
 #[allow(dead_code)] // FIXME - remove this asap
+#[derive(Debug)]
+struct PartialMsg {
+    created: u64,        // first seen
+    retried: u64,        // last retry
+    frags: Vec<Vec<u8>>, // missing fragments are zero-sized
+}
+
+#[allow(dead_code)] // FIXME - remove this asap
+#[derive(Debug)]
+struct FragmentCache {
+    partials: BTreeMap<MsgId, PartialMsg>,
+}
+
+impl FragmentCache {
+    fn new() -> Self {
+        FragmentCache {
+            partials: BTreeMap::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SerialLink {
     stream_api: ConnectedStreamApi,
     client_sender: mpsc::Sender<LinkMessage>,
-    stop_signal: Arc<Notify>,
+    _stop_signal: Arc<Notify>,
     my_node_num: u32,
+    _fragcache: FragmentCache,
 }
 pub type SerialLinkRef = Arc<tokio::sync::Mutex<SerialLink>>;
 
@@ -49,8 +88,9 @@ impl SerialLink {
         SerialLink {
             stream_api,
             client_sender,
-            stop_signal,
+            _stop_signal: stop_signal,
             my_node_num: 0,
+            _fragcache: FragmentCache::new(),
         }
     }
 
@@ -201,8 +241,8 @@ impl SerialLink {
     // Handle fragmented messages (stub for now)
     fn handle_fragment(frag: LinkFrag) {
         debug!(
-            "received LinkFrag {:016x}: {}/{} payload sz: {}",
-            frag.msgid,
+            "received LinkFrag {}: {}/{} payload sz: {}",
+            MsgId(frag.msgid),
             frag.fragndx,
             frag.numfrag,
             frag.data.len()
@@ -254,10 +294,12 @@ impl SerialLink {
         Self::send_link_frame(linkref, link_frame).await
     }
 
-    fn compute_message_id(data: &[u8]) -> u64 {
+    fn compute_message_id(data: &[u8]) -> MsgId {
         let hash = Sha256::digest(data);
         let bytes = &hash[..8]; // Take the first 8 bytes
-        u64::from_be_bytes(bytes.try_into().expect("Slice has incorrect length"))
+        MsgId(u64::from_be_bytes(
+            bytes.try_into().expect("Slice has incorrect length"),
+        ))
     }
 
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
@@ -266,7 +308,7 @@ impl SerialLink {
         let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
-                msgid,
+                msgid: msgid.0,
                 numfrag,
                 fragndx,
                 data: chunk.to_vec(),
@@ -277,7 +319,7 @@ impl SerialLink {
                 payload: Some(Payload::Fragment(link_frag)),
             };
             debug!(
-                "sending LinkFrag {:016x}: {}/{} payload sz: {}",
+                "sending LinkFrag {}: {}/{} payload sz: {}",
                 msgid,
                 fragndx,
                 numfrag,
