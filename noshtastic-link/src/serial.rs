@@ -236,7 +236,7 @@ impl SerialLink {
             payload: Some(Payload::Complete(link_msg)),
         };
         debug!("sending complete LinkMsg");
-        Ok(Self::send_link_frame(linkref, link_frame).await?)
+        Self::send_link_frame(linkref, link_frame).await
     }
 
     fn compute_message_id(data: &[u8]) -> u64 {
@@ -248,9 +248,8 @@ impl SerialLink {
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
         let msgid = Self::compute_message_id(&msg.data);
         let data = &msg.data;
-        let numfrag: u32 = ((msg.data.len() + (LINK_FRAG_THRESH - 1)) / LINK_FRAG_THRESH) as u32;
-        let mut fragndx: u32 = 0;
-        for chunk in data.chunks(LINK_FRAG_THRESH) {
+        let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
+        for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
                 msgid,
                 numfrag,
@@ -264,7 +263,6 @@ impl SerialLink {
             };
             debug!("sending LinkFrag {:016x}: {}/{}", msgid, fragndx, numfrag);
             Self::send_link_frame(linkref.clone(), link_frame).await?;
-            fragndx += 1;
         }
         Ok(())
     }

@@ -91,8 +91,6 @@ impl TestGW {
 #[cfg(test)]
 mod tests {
     // use super::*;
-    use env_logger;
-    use hex;
     use nostrdb::Filter;
     use once_cell::sync::Lazy;
 

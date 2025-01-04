@@ -101,7 +101,7 @@ impl Sync {
             Ok(note) => {
                 let note_json = note.json()?;
                 dbg!(&note_json);
-                self.send_raw_note(&*note_json)?;
+                self.send_raw_note(&note_json)?;
             }
             Err(err) => error!("error in get_note_by_key: {:?}", err),
         }
