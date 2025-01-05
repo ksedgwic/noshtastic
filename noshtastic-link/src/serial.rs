@@ -55,8 +55,10 @@ impl fmt::Debug for MsgId {
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
 struct PartialMsg {
-    created: u64,        // first seen
-    retried: u64,        // last retry
+    inbound: bool,
+    created: u64, // first seen
+    lasttry: u64, // last retry
+    nretries: u32,
     frags: Vec<Vec<u8>>, // missing fragments are zero-sized
 }
 
@@ -72,7 +74,7 @@ impl FragmentCache {
         }
     }
 
-    fn add_fragment(&mut self, frag: &LinkFrag) -> Option<LinkMsg> {
+    fn add_fragment(&mut self, frag: &LinkFrag, inbound: bool) -> Option<LinkMsg> {
         // Retrieve or create a new PartialMsg
         let partial = self.partials.entry(MsgId(frag.msgid)).or_insert_with(|| {
             let timestamp = SystemTime::now()
@@ -81,8 +83,10 @@ impl FragmentCache {
                 .as_secs();
             let frags = vec![Vec::new(); frag.numfrag as usize];
             PartialMsg {
+                inbound,
                 created: timestamp,
-                retried: timestamp,
+                lasttry: timestamp, // not a retry, but used to schedulefirst retry
+                nretries: 0,
                 frags,
             }
         });
@@ -95,21 +99,23 @@ impl FragmentCache {
             return None; // Invalid fragment index
         }
 
-        // Check if all fragments are present
-        if partial.frags.iter().all(|f| !f.is_empty()) {
-            // Assemble the complete message
-            let mut complete_data = Vec::new();
-            for fragment in &partial.frags {
-                complete_data.extend_from_slice(fragment);
+        if inbound {
+            // Check if all fragments are present
+            if partial.frags.iter().all(|f| !f.is_empty()) {
+                // Assemble the complete message
+                let mut complete_data = Vec::new();
+                for fragment in &partial.frags {
+                    complete_data.extend_from_slice(fragment);
+                }
+
+                // we don't purge the PartialMsg right away so it will be
+                // available if other nodes need retries
+
+                // Return the complete LinkMsg
+                return Some(LinkMsg {
+                    data: complete_data,
+                });
             }
-
-            // Remove the completed partial message
-            self.partials.remove(&MsgId(frag.msgid));
-
-            // Return the complete LinkMsg
-            return Some(LinkMsg {
-                data: complete_data,
-            });
         }
 
         // Return None if the message is not yet complete
@@ -296,8 +302,9 @@ impl SerialLink {
             frag.numfrag,
             frag.data.len()
         );
+        let inbound = true;
         let mut link = linkref.lock().await;
-        if let Some(linkmsg) = link.fragcache.add_fragment(&frag) {
+        if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
             debug!("completed LinkFrag {}", MsgId(frag.msgid));
             if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
                 error!("failed to send message: {}", err);
@@ -369,6 +376,12 @@ impl SerialLink {
                 fragndx,
                 data: chunk.to_vec(),
             };
+            let inbound = false;
+            linkref
+                .lock()
+                .await
+                .fragcache
+                .add_fragment(&link_frag, inbound);
             let link_frame = LinkFrame {
                 magic: LINK_MAGIC,
                 version: LINK_VERSION,
