@@ -11,10 +11,11 @@ use nostrdb::Transaction;
 use prost::Message;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{self, sleep, Duration};
 
-use noshtastic_link::{self, LinkError, LinkMessage, LinkRef};
+use noshtastic_link::{self, LinkMessage, LinkRef};
 
 pub mod proto {
     include!("../protos/noshtastic_sync.rs");
@@ -26,12 +27,11 @@ pub use proto::{Ping, Pong, RawNote};
 pub mod error;
 pub use error::*;
 
-use tokio::sync::mpsc;
-
 #[derive(Debug)]
 pub struct Sync {
     ndb: Ndb,
-    linkref: LinkRef,
+    _linkref: LinkRef,
+    link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
 }
@@ -40,16 +40,18 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 impl Sync {
     pub fn new(
         ndb: Ndb,
-        linkref: LinkRef,
-        receiver: mpsc::Receiver<LinkMessage>,
+        _linkref: LinkRef,
+        link_tx: mpsc::Sender<LinkMessage>,
+        link_rx: mpsc::Receiver<LinkMessage>,
     ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
             ndb: ndb.clone(),
-            linkref,
+            _linkref,
+            link_tx,
             ping_duration: None,
             max_notes: 100,
         }));
-        Self::start_message_handler(receiver, syncref.clone());
+        Self::start_message_handler(syncref.clone(), link_rx);
         Self::start_local_subscription(syncref.clone())?;
         Ok(syncref)
     }
@@ -108,7 +110,7 @@ impl Sync {
         Ok(())
     }
 
-    fn start_message_handler(mut receiver: mpsc::Receiver<LinkMessage>, syncref: SyncRef) {
+    fn start_message_handler(syncref: SyncRef, mut receiver: mpsc::Receiver<LinkMessage>) {
         tokio::spawn(async move {
             info!("sync message handler starting");
             while let Some(message) = receiver.recv().await {
@@ -165,7 +167,7 @@ impl Sync {
         });
     }
 
-    fn send_message(&self, payload: Option<Payload>) -> SyncResult<()> {
+    fn queue_outgoing_message(&self, payload: Option<Payload>) -> SyncResult<()> {
         // Create a SyncMessage
         let message = SyncMessage {
             version: 1, // Protocol version
@@ -178,20 +180,17 @@ impl Sync {
             SyncError::internal_error(format!("sync: failed to encode message: {:?}", err))
         })?;
 
-        // Send the serialized message
+        // queue the outgoing message, this shouldn't block
         task::block_in_place(|| {
             let runtime = tokio::runtime::Handle::current();
-            runtime.block_on(async {
-                self.linkref
-                    .lock()
-                    .await
-                    .queue_message(buffer.into())
-                    .await?;
-                Ok::<(), LinkError>(()) // ensure compatibility with `LinkError`
-            })
+            runtime.block_on(async { self.link_tx.send(buffer.into()).await })
         })
-        .map_err(SyncError::from)?;
-
+        .map_err(|err| {
+            SyncError::internal_error(format!(
+                "queue_outgoing_message: mspc send error: {:?}",
+                err
+            ))
+        })?;
         Ok(())
     }
 
@@ -200,17 +199,17 @@ impl Sync {
         let raw_note = Payload::RawNote(RawNote {
             data: eventbuf.as_bytes().to_vec(),
         });
-        self.send_message(Some(raw_note))
+        self.queue_outgoing_message(Some(raw_note))
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
         info!("sending Ping id: {}", ping_id);
-        self.send_message(Some(Payload::Ping(Ping { id: ping_id })))
+        self.queue_outgoing_message(Some(Payload::Ping(Ping { id: ping_id })))
     }
 
     fn send_pong(&self, pong_id: u32) -> SyncResult<()> {
         info!("sending Pong id: {}", pong_id);
-        self.send_message(Some(Payload::Pong(Pong { id: pong_id })))
+        self.queue_outgoing_message(Some(Payload::Pong(Pong { id: pong_id })))
     }
 
     pub fn start_pinging(syncref: SyncRef, duration: Duration) -> SyncResult<()> {

@@ -121,8 +121,8 @@ async fn main() -> Result<()> {
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
     let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
-    let (linkref, receiver) = create_link(&args.serial).await?;
-    let syncref = Sync::new(ndb.clone(), linkref, receiver)?;
+    let (linkref, link_tx, link_rx) = create_link(&args.serial).await?;
+    let syncref = Sync::new(ndb.clone(), linkref, link_tx, link_rx)?;
 
     testgw.start()?;
     if args.enable_ping {

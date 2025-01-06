@@ -120,7 +120,7 @@ impl FragmentCache {
 #[derive(Debug)]
 pub struct SerialLink {
     stream_api: ConnectedStreamApi,
-    client_sender: mpsc::Sender<LinkMessage>,
+    client_out_tx: mpsc::Sender<LinkMessage>,
     _stop_signal: Arc<Notify>,
     my_node_num: u32,
     fragcache: FragmentCache,
@@ -130,12 +130,12 @@ pub type SerialLinkRef = Arc<tokio::sync::Mutex<SerialLink>>;
 impl SerialLink {
     pub fn new(
         stream_api: ConnectedStreamApi,
-        client_sender: mpsc::Sender<LinkMessage>,
+        client_out_tx: mpsc::Sender<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> Self {
         SerialLink {
             stream_api,
-            client_sender,
+            client_out_tx,
             _stop_signal: stop_signal,
             my_node_num: 0,
             fragcache: FragmentCache::new(),
@@ -149,7 +149,11 @@ impl SerialLink {
 
     pub async fn create_serial_link(
         maybe_serial: &Option<String>,
-    ) -> LinkResult<(LinkRef, mpsc::Receiver<LinkMessage>)> {
+    ) -> LinkResult<(
+        LinkRef,
+        mpsc::Sender<LinkMessage>,
+        mpsc::Receiver<LinkMessage>,
+    )> {
         let serial = match maybe_serial.clone() {
             Some(serial) => serial, // specified, just use
             None => {
@@ -179,40 +183,40 @@ impl SerialLink {
             .expect("no radio found");
         let config_id = utils::generate_rand_id();
         let stream_api = StreamApi::new();
-        let (packet_receiver, stream_api) = stream_api.connect(serial_stream).await;
+        let (mesh_in_rx, stream_api) = stream_api.connect(serial_stream).await;
         let stream_api = stream_api.configure(config_id).await?;
 
-        let (client_sender, client_receiver) = mpsc::channel::<LinkMessage>(100);
+        // Channel used for receiving outgoing messages from the client to be sent to the mesh
+        let (client_in_tx, client_in_rx) = mpsc::channel::<LinkMessage>(100);
+
+        // Channel used for sending (defragmented) incoming messages to the client
+        let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
+
         let stop_signal = Arc::new(Notify::new());
         let slinkref = Arc::new(Mutex::new(SerialLink::new(
             stream_api,
-            client_sender,
+            client_out_tx,
             stop_signal.clone(),
         )));
 
-        let link_receiver = SerialLink::start_mesh_listener(
-            slinkref.clone(),
-            packet_receiver,
-            stop_signal.clone(),
-        )?;
+        SerialLink::start_mesh_listener(slinkref.clone(), mesh_in_rx, stop_signal.clone())?;
 
-        SerialLink::start_client_listener(slinkref.clone(), client_receiver, stop_signal.clone())?;
+        SerialLink::start_client_listener(slinkref.clone(), client_in_rx, stop_signal.clone())?;
 
-        Ok((slinkref, link_receiver))
+        Ok((slinkref, client_in_tx, client_out_rx))
     }
 
     fn start_mesh_listener(
         linkref: SerialLinkRef,
-        mut packet_receiver: mpsc::UnboundedReceiver<FromRadio>,
+        mut mesh_in_rx: mpsc::UnboundedReceiver<FromRadio>,
         stop_signal: Arc<Notify>,
-    ) -> LinkResult<mpsc::Receiver<LinkMessage>> {
-        let (link_sender, link_receiver) = mpsc::channel::<LinkMessage>(100);
+    ) -> LinkResult<()> {
         task::spawn(async move {
             info!("mesh_listener starting");
             loop {
                 tokio::select! {
-                    Some(packet) = packet_receiver.recv() => {
-                        Self::handle_packet(&linkref, packet, &link_sender).await;
+                    Some(packet) = mesh_in_rx.recv() => {
+                        Self::handle_packet(&linkref, packet).await;
                     },
                     _ = stop_signal.notified() => {
                         break;
@@ -221,39 +225,29 @@ impl SerialLink {
             }
             info!("mesh_listener finished");
         });
-        Ok(link_receiver)
+        Ok(())
     }
 
     // Handle incoming packets
-    async fn handle_packet(
-        linkref: &SerialLinkRef,
-        packet: FromRadio,
-        link_sender: &mpsc::Sender<LinkMessage>,
-    ) {
+    async fn handle_packet(linkref: &SerialLinkRef, packet: FromRadio) {
         match packet.payload_variant {
             Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
                 linkref.lock().await.set_my_node_num(myinfo.my_node_num);
             }
             Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
-                Self::handle_mesh_packet(linkref, mesh_packet, link_sender).await;
+                Self::handle_mesh_packet(linkref, mesh_packet).await;
             }
             _ => {} // Ignore other variants
         }
     }
 
     // Handle mesh packets
-    async fn handle_mesh_packet(
-        linkref: &SerialLinkRef,
-        mesh_packet: MeshPacket,
-        link_sender: &mpsc::Sender<LinkMessage>,
-    ) {
+    async fn handle_mesh_packet(linkref: &SerialLinkRef, mesh_packet: MeshPacket) {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
         {
             if decoded.portnum() == PortNum::PrivateApp {
                 match Self::decode_link_frame(decoded.payload.clone()) {
-                    Ok(link_frame) => {
-                        Self::process_link_frame(linkref, link_frame, link_sender).await
-                    }
+                    Ok(link_frame) => Self::process_link_frame(linkref, link_frame).await,
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
                 }
             }
@@ -267,17 +261,13 @@ impl SerialLink {
     }
 
     // Process the LinkFrame
-    async fn process_link_frame(
-        linkref: &SerialLinkRef,
-        link_frame: LinkFrame,
-        link_sender: &mpsc::Sender<LinkMessage>,
-    ) {
+    async fn process_link_frame(linkref: &SerialLinkRef, link_frame: LinkFrame) {
         match link_frame.payload {
-            Some(Payload::Complete(link_msg)) => {
-                Self::handle_complete(link_msg, link_sender).await;
+            Some(Payload::Complete(linkmsg)) => {
+                Self::handle_complete(linkref, linkmsg).await;
             }
-            Some(Payload::Fragment(link_frag)) => {
-                Self::handle_fragment(linkref, link_frag, link_sender).await;
+            Some(Payload::Fragment(linkfrag)) => {
+                Self::handle_fragment(linkref, linkfrag).await;
             }
             None => {
                 warn!("LinkFrame payload is missing");
@@ -286,22 +276,19 @@ impl SerialLink {
     }
 
     // Handle unfragmented messages
-    async fn handle_complete(linkmsg: LinkMsg, link_sender: &mpsc::Sender<LinkMessage>) {
+    async fn handle_complete(linkref: &SerialLinkRef, linkmsg: LinkMsg) {
         debug!(
             "received complete LinkMsg w/ payload sz: {}",
             linkmsg.data.len()
         );
-        if let Err(err) = link_sender.send(LinkMessage::from(linkmsg)).await {
+        let link = linkref.lock().await;
+        if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
             error!("failed to send message: {}", err);
         }
     }
 
     // Handle fragmented messages (stub for now)
-    async fn handle_fragment(
-        linkref: &SerialLinkRef,
-        frag: LinkFrag,
-        link_sender: &mpsc::Sender<LinkMessage>,
-    ) {
+    async fn handle_fragment(linkref: &SerialLinkRef, frag: LinkFrag) {
         debug!(
             "received LinkFrag {}: {}/{} payload sz: {}",
             MsgId(frag.msgid),
@@ -309,9 +296,10 @@ impl SerialLink {
             frag.numfrag,
             frag.data.len()
         );
-        if let Some(linkmsg) = linkref.lock().await.fragcache.add_fragment(&frag) {
+        let mut link = linkref.lock().await;
+        if let Some(linkmsg) = link.fragcache.add_fragment(&frag) {
             debug!("completed LinkFrag {}", MsgId(frag.msgid));
-            if let Err(err) = link_sender.send(LinkMessage::from(linkmsg)).await {
+            if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
                 error!("failed to send message: {}", err);
             }
         }
@@ -319,14 +307,14 @@ impl SerialLink {
 
     fn start_client_listener(
         linkref: SerialLinkRef,
-        mut client_receiver: mpsc::Receiver<LinkMessage>,
+        mut client_in_rx: mpsc::Receiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<()> {
         task::spawn(async move {
             info!("client_listener starting");
             loop {
                 tokio::select! {
-                    Some(msg) = client_receiver.recv() => {
+                    Some(msg) = client_in_rx.recv() => {
                         if let Err(err) = Self::send_link_message(linkref.clone(), msg).await {
                             error!("send failed: {:?}", err);
                         }
@@ -447,10 +435,7 @@ impl SerialLink {
 
 #[async_trait]
 impl MeshtasticLink for SerialLink {
-    async fn queue_message(&mut self, msg: LinkMessage) -> LinkResult<()> {
-        self.client_sender.send(msg.clone()).await?;
-        Ok(())
-    }
+    // maybe not needed?
 }
 
 struct LinkPacketRouter {

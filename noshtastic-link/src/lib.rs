@@ -55,13 +55,16 @@ impl From<LinkMsg> for LinkMessage {
 
 #[async_trait]
 pub trait MeshtasticLink: Send + Sync + Debug {
-    /// Send a message frame
-    async fn queue_message(&mut self, msg: LinkMessage) -> LinkResult<()>;
+    // no longer needed, but lazy deleting in case we need again ...
 }
 
 pub async fn create_link(
     maybe_serial: &Option<String>,
-) -> LinkResult<(LinkRef, mpsc::Receiver<LinkMessage>)> {
+) -> LinkResult<(
+    LinkRef,
+    mpsc::Sender<LinkMessage>,
+    mpsc::Receiver<LinkMessage>,
+)> {
     // In the future we may have radio interfaces other than serial ...
     serial::SerialLink::create_serial_link(maybe_serial).await
 }
