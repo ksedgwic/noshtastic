@@ -9,6 +9,7 @@ message LinkFrame {
   oneof payload {
     LinkMsg complete = 3;	// A complete, unfragmented message
     LinkFrag fragment = 4;	// A fragment of a message
+    LinkMissing missing = 5;	// Requests missing fragment resend
   }
 }
 
@@ -23,4 +24,10 @@ message LinkFrag {
   uint32 numfrag = 2;   // Total number of fragments in the packet
   uint32 fragndx = 3;	// Index of this fragment (starting at 0)
   bytes data = 4;	// Raw data buffer for this fragment
+}
+
+// A missing fragment resend request
+message LinkMissing {
+  fixed64 msgid = 1;		// Unique identifier for the message, common to the fragments
+  repeated uint32 fragndx = 2; 	// List of all missing fragments
 }
