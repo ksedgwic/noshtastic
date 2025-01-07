@@ -55,7 +55,7 @@ impl TestGW {
                     WsEvent::Message(WsMessage::Text(text)) => {
                         debug!("saw text msg: {}", text);
                         if let Err(err) = ndb_clone.process_event(&text) {
-                            error!("error processing event {}: {:?}", text, err);
+                            error!("ndb process_event failed: {}: {:?}", text, err);
                         }
                     }
                     WsEvent::Message(msg) => {

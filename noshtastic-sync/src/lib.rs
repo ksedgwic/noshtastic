@@ -150,6 +150,9 @@ impl Sync {
     fn handle_raw_note(&self, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
             debug!("saw RawNote: {}", utf8_str);
+            if let Err(err) = self.ndb.process_client_event(&utf8_str) {
+                error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
+            }
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
         }
