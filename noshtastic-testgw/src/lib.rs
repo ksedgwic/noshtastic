@@ -53,7 +53,7 @@ impl TestGW {
             while let Some(event) = pool.try_recv() {
                 match event.event {
                     WsEvent::Message(WsMessage::Text(text)) => {
-                        debug!("saw text msg: {}", text);
+                        debug!("ingesting: {}", text);
                         if let Err(err) = ndb_clone.process_event(&text) {
                             error!("ndb process_event failed: {}: {:?}", text, err);
                         }
