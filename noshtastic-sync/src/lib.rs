@@ -15,17 +15,18 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{self, sleep, Duration};
 
-use noshtastic_link::{self, LinkMessage, LinkRef};
+use noshtastic_link::{self, LinkMessage, LinkRef, MsgId};
 
+pub mod error;
+pub mod lruset;
+pub use error::*;
 pub mod proto {
     include!("../protos/noshtastic_sync.rs");
 }
+pub use lruset::LruSet;
 pub use proto::sync_message::Payload;
 pub use proto::SyncMessage;
 pub use proto::{Ping, Pong, RawNote};
-
-pub mod error;
-pub use error::*;
 
 #[derive(Debug)]
 pub struct Sync {
@@ -34,6 +35,7 @@ pub struct Sync {
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
+    recently_inserted: LruSet<MsgId>,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -50,6 +52,7 @@ impl Sync {
             link_tx,
             ping_duration: None,
             max_notes: 100,
+            recently_inserted: LruSet::new(20),
         }));
         Self::start_message_handler(syncref.clone(), link_rx);
         Self::start_local_subscription(syncref.clone())?;
@@ -102,8 +105,15 @@ impl Sync {
         match self.ndb.get_note_by_key(&txn, notekey) {
             Ok(note) => {
                 let note_json = note.json()?;
-                dbg!(&note_json);
-                self.send_raw_note(&note_json)?;
+                let msgid: MsgId = note_json.as_bytes().into();
+                if self.recently_inserted.contains(&msgid) {
+                    // we don't need to automatically send messages
+                    // that we just heard from the mesh
+                    debug!("suppressing send of recently inserted {}", msgid);
+                } else {
+                    dbg!(&note_json);
+                    self.send_raw_note(&note_json)?;
+                }
             }
             Err(err) => error!("error in get_note_by_key: {:?}", err),
         }
@@ -124,7 +134,7 @@ impl Sync {
     }
 
     fn handle_sync_message(syncref: SyncRef, message: SyncMessage) {
-        let sync = syncref.lock().unwrap();
+        let mut sync = syncref.lock().unwrap();
         match message.payload {
             Some(Payload::Ping(ping)) => {
                 info!("received Ping id: {}", ping.id);
@@ -147,9 +157,14 @@ impl Sync {
         }
     }
 
-    fn handle_raw_note(&self, raw_note: RawNote) {
+    fn handle_raw_note(&mut self, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
             debug!("saw RawNote: {}", utf8_str);
+            if let Err(err) = self.ndb.process_client_event(utf8_str) {
+                error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
+            }
+            let msgid: MsgId = utf8_str.as_bytes().into();
+            self.recently_inserted.insert(msgid);
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
         }

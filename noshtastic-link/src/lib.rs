@@ -5,6 +5,9 @@
 
 use async_trait::async_trait;
 use prost::Message;
+use sha2::{Digest, Sha256};
+use std::convert::From;
+use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -67,4 +70,31 @@ pub async fn create_link(
 )> {
     // In the future we may have radio interfaces other than serial ...
     serial::SerialLink::create_serial_link(maybe_serial).await
+}
+
+// The MsgId is a 64 bit message identifier, because other ids
+// are too short or too long ...
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MsgId(u64);
+
+impl fmt::Display for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
+impl fmt::Debug for MsgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MsgId({:016x})", self.0)
+    }
+}
+
+impl From<&[u8]> for MsgId {
+    fn from(data: &[u8]) -> Self {
+        let hash = Sha256::digest(data);
+        let bytes = &hash[..8]; // Take the first 8 bytes
+        MsgId(u64::from_be_bytes(
+            bytes.try_into().expect("Slice has incorrect length"),
+        ))
+    }
 }
