@@ -13,10 +13,8 @@ use meshtastic::{
     utils,
 };
 use prost::Message;
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fmt,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -28,29 +26,12 @@ use tokio::{
 
 use crate::{
     proto::LinkMissing, LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg, LinkRef, LinkResult,
-    MeshtasticLink, Payload,
+    MeshtasticLink, MsgId, Payload,
 };
 
 const LINK_VERSION: u32 = 1;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_FRAG_THRESH: usize = 200;
-
-// Fragments share a common MsgId which is derived from a hash
-// of the whole message.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct MsgId(u64);
-
-impl fmt::Display for MsgId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}", self.0)
-    }
-}
-
-impl fmt::Debug for MsgId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MsgId({:016x})", self.0)
-    }
-}
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -486,16 +467,8 @@ impl SerialLink {
         Self::send_link_frame(linkref, link_frame).await
     }
 
-    fn compute_message_id(data: &[u8]) -> MsgId {
-        let hash = Sha256::digest(data);
-        let bytes = &hash[..8]; // Take the first 8 bytes
-        MsgId(u64::from_be_bytes(
-            bytes.try_into().expect("Slice has incorrect length"),
-        ))
-    }
-
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let msgid = Self::compute_message_id(&msg.data);
+        let msgid: MsgId = msg.data.as_slice().into();
         let data = &msg.data;
         let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
