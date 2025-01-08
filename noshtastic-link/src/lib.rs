@@ -15,13 +15,14 @@ use tokio::sync::mpsc;
 pub mod error;
 pub use error::*;
 
-pub mod serial; // serial connection to radio
-
-pub mod proto {
+mod proto {
     include!("../protos/noshtastic_link.rs");
 }
+mod fragcache;
+mod serial;
 
-pub use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
+pub(crate) use fragcache::FragmentCache;
+pub(crate) use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
 
 pub type LinkRef = Arc<tokio::sync::Mutex<dyn MeshtasticLink>>;
 
