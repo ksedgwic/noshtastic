@@ -15,6 +15,7 @@ use meshtastic::{
 use prost::Message;
 use std::{
     collections::BTreeMap,
+    process,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -222,7 +223,16 @@ impl SerialLink {
         info!("opening serial link on {}", serial);
 
         let serial_stream = utils::stream::build_serial_stream(serial.clone(), None, None, None)
-            .expect("no radio found");
+            .map_err(|err| {
+                error!("failed to open {}: {:?}", serial, err);
+                info!(
+                    "available ports: {:?}. Use --serial to specify.",
+                    utils::stream::available_serial_ports().expect("available_serial_ports")
+                );
+                process::exit(1);
+            })
+            .unwrap();
+
         let config_id = utils::generate_rand_id();
         let stream_api = StreamApi::new();
         let (mesh_in_rx, stream_api) = stream_api.connect(serial_stream).await;
