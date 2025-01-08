@@ -64,7 +64,7 @@ impl Sync {
         task::spawn(async move {
             debug!("local subscription starting");
             loop {
-                trace!("waiting on local subscription");
+                debug!("waiting on local subscription");
                 match ndb_clone.wait_for_notes(ndbsubid, max_notes).await {
                     Ok(notekeys) => {
                         info!("saw notekeys: {:?}", notekeys);
