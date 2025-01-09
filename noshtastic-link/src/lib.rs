@@ -10,7 +10,7 @@ use std::convert::From;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 pub mod error;
 pub use error::*;
@@ -64,13 +64,14 @@ pub trait MeshtasticLink: Send + Sync + Debug {
 
 pub async fn create_link(
     maybe_serial: &Option<String>,
+    stop_signal: Arc<Notify>,
 ) -> LinkResult<(
     LinkRef,
     mpsc::Sender<LinkMessage>,
     mpsc::Receiver<LinkMessage>,
 )> {
     // In the future we may have radio interfaces other than serial ...
-    serial::SerialLink::create_serial_link(maybe_serial).await
+    serial::SerialLink::create_serial_link(maybe_serial, stop_signal).await
 }
 
 // The PayloadId is a 64 bit message identifier, because other ids

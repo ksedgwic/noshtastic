@@ -61,6 +61,7 @@ impl SerialLink {
 
     pub(crate) async fn create_serial_link(
         maybe_serial: &Option<String>,
+        stop_signal: Arc<Notify>,
     ) -> LinkResult<(
         LinkRef,
         mpsc::Sender<LinkMessage>,
@@ -113,7 +114,6 @@ impl SerialLink {
         // Channel used for sending (defragmented) incoming messages to the client
         let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
 
-        let stop_signal = Arc::new(Notify::new());
         let slinkref = Arc::new(Mutex::new(SerialLink::new(
             stream_api,
             client_out_tx,

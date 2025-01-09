@@ -4,25 +4,25 @@
 // or <https://www.gnu.org/licenses/> for details.
 
 use log::*;
-use nostrdb::Filter;
-use nostrdb::Ndb;
-use nostrdb::NoteKey;
-use nostrdb::Transaction;
+use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
-use tokio::task;
-use tokio::time::{self, sleep, Duration};
+use std::{
+    fmt::Debug,
+    sync::{Arc, Mutex},
+};
+use tokio::{
+    sync::{mpsc, Notify},
+    task,
+    time::{self, sleep, Duration},
+};
 
-use noshtastic_link::{self, LinkMessage, LinkRef, PayloadId};
+use noshtastic_link::{self, LinkMessage, PayloadId};
 
 use crate::{LruSet, Payload, Ping, Pong, RawNote, SyncError, SyncMessage, SyncResult};
 
 #[derive(Debug)]
 pub struct Sync {
     ndb: Ndb,
-    _linkref: LinkRef,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
@@ -33,24 +33,23 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 impl Sync {
     pub fn new(
         ndb: Ndb,
-        _linkref: LinkRef,
         link_tx: mpsc::Sender<LinkMessage>,
         link_rx: mpsc::Receiver<LinkMessage>,
+        stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
             ndb: ndb.clone(),
-            _linkref,
             link_tx,
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
         }));
-        Self::start_message_handler(syncref.clone(), link_rx);
-        Self::start_local_subscription(syncref.clone())?;
+        Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
+        Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
         Ok(syncref)
     }
 
-    fn start_local_subscription(syncref: SyncRef) -> SyncResult<()> {
+    fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
         let sync = syncref.lock().unwrap();
         let filter = Filter::new()
             .kinds([1])
@@ -112,16 +111,28 @@ impl Sync {
         Ok(())
     }
 
-    fn start_message_handler(syncref: SyncRef, mut receiver: mpsc::Receiver<LinkMessage>) {
+    fn start_message_handler(
+        syncref: SyncRef,
+        mut receiver: mpsc::Receiver<LinkMessage>,
+        stop_signal: Arc<Notify>,
+    ) {
         tokio::spawn(async move {
             info!("sync message handler starting");
-            while let Some(message) = receiver.recv().await {
-                match SyncMessage::decode(message.to_bytes()) {
-                    Ok(decoded) => Self::handle_sync_message(syncref.clone(), decoded),
-                    Err(e) => error!("Failed to decode message: {}", e),
+            loop {
+                tokio::select! {
+                    Some(message) = receiver.recv() => {
+                        match SyncMessage::decode(message.to_bytes()) {
+                            Ok(decoded) => Self::handle_sync_message(syncref.clone(), decoded),
+                            Err(e) => error!("Failed to decode message: {}", e),
+                        }
+                    }
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+
                 }
+                info!("sync message handler finished");
             }
-            info!("sync message handler finished");
         });
     }
 
