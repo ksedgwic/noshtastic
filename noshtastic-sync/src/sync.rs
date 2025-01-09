@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{self, sleep, Duration};
 
-use noshtastic_link::{self, LinkMessage, LinkRef, MsgId};
+use noshtastic_link::{self, LinkMessage, LinkRef, PayloadId};
 
 use crate::{LruSet, Payload, Ping, Pong, RawNote, SyncError, SyncMessage, SyncResult};
 
@@ -26,7 +26,7 @@ pub struct Sync {
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
-    recently_inserted: LruSet<MsgId>,
+    recently_inserted: LruSet<PayloadId>,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -96,7 +96,8 @@ impl Sync {
         match self.ndb.get_note_by_key(&txn, notekey) {
             Ok(note) => {
                 let note_json = note.json()?;
-                let msgid: MsgId = note_json.as_bytes().into();
+                // use the links's PayloadId because it's a good size
+                let msgid: PayloadId = note_json.as_bytes().into();
                 if self.recently_inserted.contains(&msgid) {
                     // we don't need to automatically send messages
                     // that we just heard from the mesh
@@ -154,7 +155,8 @@ impl Sync {
             if let Err(err) = self.ndb.process_client_event(utf8_str) {
                 error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
             }
-            let msgid: MsgId = utf8_str.as_bytes().into();
+            // use the links's PayloadId because it's a good size
+            let msgid: PayloadId = utf8_str.as_bytes().into();
             self.recently_inserted.insert(msgid);
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);

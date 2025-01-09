@@ -73,28 +73,28 @@ pub async fn create_link(
     serial::SerialLink::create_serial_link(maybe_serial).await
 }
 
-// The MsgId is a 64 bit message identifier, because other ids
+// The PayloadId is a 64 bit message identifier, because other ids
 // are too short or too long ...
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MsgId(u64);
+pub struct PayloadId(u64);
 
-impl fmt::Display for MsgId {
+impl fmt::Display for PayloadId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:016x}", self.0)
     }
 }
 
-impl fmt::Debug for MsgId {
+impl fmt::Debug for PayloadId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MsgId({:016x})", self.0)
+        write!(f, "PayloadId({:016x})", self.0)
     }
 }
 
-impl From<&[u8]> for MsgId {
+impl From<&[u8]> for PayloadId {
     fn from(data: &[u8]) -> Self {
         let hash = Sha256::digest(data);
         let bytes = &hash[..8]; // Take the first 8 bytes
-        MsgId(u64::from_be_bytes(
+        PayloadId(u64::from_be_bytes(
             bytes.try_into().expect("Slice has incorrect length"),
         ))
     }
