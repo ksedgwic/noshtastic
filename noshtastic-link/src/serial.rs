@@ -194,7 +194,7 @@ impl SerialLink {
         }
     }
 
-    // Handle incoming packets
+    // Handle incoming packets from the radio
     async fn handle_packet(linkref: &SerialLinkRef, packet: FromRadio) {
         match packet.payload_variant {
             Some(from_radio::PayloadVariant::MyInfo(myinfo)) => {
@@ -251,7 +251,7 @@ impl SerialLink {
         }
     }
 
-    // Handle fragmented messages (stub for now)
+    // Handle fragmented messages
     async fn handle_fragment(linkref: &SerialLinkRef, frag: LinkFrag) {
         debug!(
             "received LinkFrag {}: {}/{} payload sz: {}",

@@ -78,7 +78,7 @@ impl NegentropyState {
             .map(|id| id.to_bytes().to_vec())
             .collect();
         if let Some(negmsg) = &maybe_negmsg {
-            negentropy.dump_query(&negmsg, std::io::stdout())?;
+            negentropy.dump_query(negmsg, std::io::stdout())?;
         }
         Ok(maybe_negmsg.map(|bytes| bytes.to_vec()))
     }
