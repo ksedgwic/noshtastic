@@ -18,6 +18,7 @@ struct PartialMsg {
     created: u64, // first seen
     lasttry: u64, // last retry
     nretries: u32,
+    completed: bool,     // don't need to upcall to client more than once
     frags: Vec<Vec<u8>>, // missing fragments are zero-sized
 }
 
@@ -50,6 +51,7 @@ impl FragmentCache {
                     lasttry: timestamp, // not a retry, but used to schedulefirst retry
                     nretries: 0,
                     frags,
+                    completed: false,
                 }
             });
 
@@ -61,26 +63,29 @@ impl FragmentCache {
             return None; // Invalid fragment index
         }
 
-        if inbound {
-            // Check if all fragments are present
-            if partial.frags.iter().all(|f| !f.is_empty()) {
-                // Assemble the complete message
-                let mut complete_data = Vec::new();
-                for fragment in &partial.frags {
-                    complete_data.extend_from_slice(fragment);
+        if !partial.completed {
+            if inbound {
+                // Check if all fragments are present
+                if partial.frags.iter().all(|f| !f.is_empty()) {
+                    // Assemble the complete message
+                    let mut complete_data = Vec::new();
+                    for fragment in &partial.frags {
+                        complete_data.extend_from_slice(fragment);
+                    }
+
+                    // we don't purge the PartialMsg right away so it will be
+                    // available if other nodes need retries
+
+                    partial.completed = true;
+                    return Some(LinkMsg {
+                        data: complete_data,
+                    });
                 }
-
-                // we don't purge the PartialMsg right away so it will be
-                // available if other nodes need retries
-
-                // Return the complete LinkMsg
-                return Some(LinkMsg {
-                    data: complete_data,
-                });
             }
         }
 
-        // Return None if the message is not yet complete
+        // Return None if the message is not yet complete or has
+        // already been returned previously as completed
         None
     }
 
