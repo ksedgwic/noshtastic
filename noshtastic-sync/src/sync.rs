@@ -206,8 +206,11 @@ impl Sync {
                         }
                     }
                 }
-                debug!("have: {:?}", DebugVecId(have_ids));
-                debug!("need: {:?}", DebugVecId(need_ids));
+                debug!("have: {:?}", DebugVecId(have_ids.clone()));
+                debug!("need: {:?}", DebugVecId(need_ids.clone()));
+                if let Err(err) = sync.send_needed_notes(have_ids) {
+                    error!("send needed notes failed: {:?}", err);
+                }
             }
             None => {
                 warn!("received SyncMessage with no payload");
@@ -268,6 +271,27 @@ impl Sync {
         Ok(())
     }
 
+    fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
+        let txn = Transaction::new(&self.ndb)?;
+        for id in needed {
+            if id.len() == 32 {
+                let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
+                match self.ndb.get_note_by_id(&txn, id_array) {
+                    Err(err) => error!("trouble in get_note_by_id: {:?}", err),
+                    Ok(note) => {
+                        if let Ok(note_json) = note.json() {
+                            if let Err(err) = self.send_raw_note(&note_json) {
+                                error!("trouble sending needed raw note: {:?}", err);
+                                // keep going
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
         info!("sending NegentropyMessage sz: {}", data.len());
         let negmsg = Payload::Negentropy(NegentropyMessage {
@@ -276,10 +300,10 @@ impl Sync {
         self.queue_outgoing_message(Some(negmsg))
     }
 
-    fn send_raw_note(&self, eventbuf: &str) -> SyncResult<()> {
-        info!("sending RawNote sz: {}", eventbuf.len());
+    fn send_raw_note(&self, note_json: &str) -> SyncResult<()> {
+        info!("sending RawNote sz: {}", note_json.len());
         let raw_note = Payload::RawNote(RawNote {
-            data: eventbuf.as_bytes().to_vec(),
+            data: note_json.as_bytes().to_vec(),
         });
         self.queue_outgoing_message(Some(raw_note))
     }
