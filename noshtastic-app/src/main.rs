@@ -11,11 +11,12 @@ use env_logger::fmt::Formatter;
 use env_logger::Builder;
 use log::*;
 use nostrdb::{Config, Ndb};
-use std::env;
-use std::io::Write;
-use std::path::Path;
-use tokio::signal;
-use tokio::time::{sleep, Duration};
+use std::{env, io::Write, path::Path, sync::Arc};
+use tokio::{
+    signal,
+    sync::Notify,
+    time::{sleep, Duration},
+};
 
 use noshtastic_link::create_link;
 use noshtastic_sync::Sync;
@@ -117,12 +118,13 @@ fn init_nostrdb(data_dir: &str) -> Result<Ndb> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let stop_signal = Arc::new(Notify::new());
     init_logger();
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
     let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
-    let (linkref, link_tx, link_rx) = create_link(&args.serial).await?;
-    let syncref = Sync::new(ndb.clone(), linkref, link_tx, link_rx)?;
+    let (_linkref, link_tx, link_rx) = create_link(&args.serial, stop_signal.clone()).await?;
+    let syncref = Sync::new(ndb.clone(), link_tx, link_rx, stop_signal.clone())?;
 
     testgw.start()?;
     if args.enable_ping {
@@ -136,6 +138,7 @@ async fn main() -> Result<()> {
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("Received ^C, shutting down.");
+            stop_signal.notify_waiters();
         }
     }
 

@@ -24,6 +24,9 @@ pub enum SyncError {
 
     #[error("sync: nostrdb error: {0}")]
     NostrdbError(#[from] nostrdb::Error),
+
+    #[error("sync: negentropy error: {0}")]
+    NegentropyError(#[from] negentropy::Error),
 }
 
 impl SyncError {

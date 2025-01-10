@@ -4,53 +4,85 @@
 // or <https://www.gnu.org/licenses/> for details.
 
 use log::*;
-use nostrdb::Filter;
-use nostrdb::Ndb;
-use nostrdb::NoteKey;
-use nostrdb::Transaction;
+use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
-use tokio::task;
-use tokio::time::{self, sleep, Duration};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
+use tokio::{
+    sync::{mpsc, Notify},
+    task,
+    time::{self, sleep, Duration},
+};
 
-use noshtastic_link::{self, LinkMessage, LinkRef, MsgId};
+use noshtastic_link::{self, LinkMessage, PayloadId};
 
-use crate::{LruSet, Payload, Ping, Pong, RawNote, SyncError, SyncMessage, SyncResult};
+use crate::{
+    negentropy::NegentropyState, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
+    SyncError, SyncMessage, SyncResult,
+};
 
-#[derive(Debug)]
 pub struct Sync {
     ndb: Ndb,
-    _linkref: LinkRef,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
-    recently_inserted: LruSet<MsgId>,
+    recently_inserted: LruSet<PayloadId>,
+    negentropy: NegentropyState,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
     pub fn new(
         ndb: Ndb,
-        _linkref: LinkRef,
         link_tx: mpsc::Sender<LinkMessage>,
         link_rx: mpsc::Receiver<LinkMessage>,
+        stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
             ndb: ndb.clone(),
-            _linkref,
             link_tx,
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
+            negentropy: NegentropyState::new(ndb.clone()),
         }));
-        Self::start_message_handler(syncref.clone(), link_rx);
-        Self::start_local_subscription(syncref.clone())?;
+        Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
+        Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
+        Self::start_negentropy_sync(syncref.clone(), stop_signal.clone())?;
         Ok(syncref)
     }
 
-    fn start_local_subscription(syncref: SyncRef) -> SyncResult<()> {
+    fn start_negentropy_sync(syncref: SyncRef, stop_signal: Arc<Notify>) -> SyncResult<()> {
+        task::spawn(async move {
+            debug!("negentropy sync starting");
+            sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
+            let mut interval = time::interval(Duration::from_secs(60));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let mut sync = syncref.lock().unwrap();
+                        match sync.negentropy.initiate() {
+                            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
+                            Ok(negbytes) =>
+                                if let Err(err) = sync.send_negentropy_message(&negbytes) {
+                                    error!("trouble sending negentropy message: {:?}", err);
+                                },
+                        }
+                    }
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+                }
+            }
+            debug!("negentropy sync stopping");
+        });
+
+        Ok(())
+    }
+
+    fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
         let sync = syncref.lock().unwrap();
         let filter = Filter::new()
             .kinds([1])
@@ -96,7 +128,8 @@ impl Sync {
         match self.ndb.get_note_by_key(&txn, notekey) {
             Ok(note) => {
                 let note_json = note.json()?;
-                let msgid: MsgId = note_json.as_bytes().into();
+                // use the links's PayloadId because it's a good size
+                let msgid: PayloadId = note_json.as_bytes().into();
                 if self.recently_inserted.contains(&msgid) {
                     // we don't need to automatically send messages
                     // that we just heard from the mesh
@@ -111,16 +144,28 @@ impl Sync {
         Ok(())
     }
 
-    fn start_message_handler(syncref: SyncRef, mut receiver: mpsc::Receiver<LinkMessage>) {
+    fn start_message_handler(
+        syncref: SyncRef,
+        mut receiver: mpsc::Receiver<LinkMessage>,
+        stop_signal: Arc<Notify>,
+    ) {
         tokio::spawn(async move {
             info!("sync message handler starting");
-            while let Some(message) = receiver.recv().await {
-                match SyncMessage::decode(message.to_bytes()) {
-                    Ok(decoded) => Self::handle_sync_message(syncref.clone(), decoded),
-                    Err(e) => error!("Failed to decode message: {}", e),
+            loop {
+                tokio::select! {
+                    Some(message) = receiver.recv() => {
+                        match SyncMessage::decode(message.to_bytes()) {
+                            Ok(decoded) => Self::handle_sync_message(syncref.clone(), decoded),
+                            Err(e) => error!("Failed to decode message: {}", e),
+                        }
+                    }
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+
                 }
+                info!("sync message handler finished");
             }
-            info!("sync message handler finished");
         });
     }
 
@@ -142,6 +187,25 @@ impl Sync {
                 info!("received RawNote sz: {}", raw_note.data.len());
                 sync.handle_raw_note(raw_note);
             }
+            Some(Payload::Negentropy(negmsg)) => {
+                info!("received NegentropyMessage sz: {}", negmsg.data.len());
+                let mut have_ids = vec![];
+                let mut need_ids = vec![];
+                match sync
+                    .negentropy
+                    .reconcile(&negmsg.data, &mut have_ids, &mut need_ids)
+                {
+                    Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
+                    Ok(None) => info!("synchronized with remote"),
+                    Ok(Some(nextmsg)) => {
+                        if let Err(err) = sync.send_negentropy_message(&nextmsg) {
+                            error!("trouble sending next negentropy message: {:?}", err);
+                        }
+                    }
+                }
+                debug!("have: {:?}", DebugVecId(have_ids));
+                debug!("need: {:?}", DebugVecId(need_ids));
+            }
             None => {
                 warn!("received SyncMessage with no payload");
             }
@@ -154,7 +218,8 @@ impl Sync {
             if let Err(err) = self.ndb.process_client_event(utf8_str) {
                 error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
             }
-            let msgid: MsgId = utf8_str.as_bytes().into();
+            // use the links's PayloadId because it's a good size
+            let msgid: PayloadId = utf8_str.as_bytes().into();
             self.recently_inserted.insert(msgid);
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
@@ -198,6 +263,14 @@ impl Sync {
             ))
         })?;
         Ok(())
+    }
+
+    fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
+        info!("sending NegentropyMessage sz: {}", data.len());
+        let negmsg = Payload::Negentropy(NegentropyMessage {
+            data: data.to_vec(),
+        });
+        self.queue_outgoing_message(Some(negmsg))
     }
 
     fn send_raw_note(&self, eventbuf: &str) -> SyncResult<()> {
@@ -252,5 +325,13 @@ impl Sync {
         }
         debug!("stopping pinger");
         Ok(())
+    }
+}
+
+pub struct DebugVecId(Vec<Vec<u8>>);
+impl fmt::Debug for DebugVecId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hex_strings: Vec<String> = self.0.iter().map(hex::encode).collect();
+        write!(f, "[{}]", hex_strings.join(", "))
     }
 }

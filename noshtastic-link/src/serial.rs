@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
     proto::LinkMissing, FragmentCache, LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg,
-    LinkRef, LinkResult, MeshtasticLink, MsgId, Payload,
+    LinkRef, LinkResult, MeshtasticLink, Payload, PayloadId,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -61,6 +61,7 @@ impl SerialLink {
 
     pub(crate) async fn create_serial_link(
         maybe_serial: &Option<String>,
+        stop_signal: Arc<Notify>,
     ) -> LinkResult<(
         LinkRef,
         mpsc::Sender<LinkMessage>,
@@ -113,7 +114,6 @@ impl SerialLink {
         // Channel used for sending (defragmented) incoming messages to the client
         let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
 
-        let stop_signal = Arc::new(Notify::new());
         let slinkref = Arc::new(Mutex::new(SerialLink::new(
             stream_api,
             client_out_tx,
@@ -179,7 +179,7 @@ impl SerialLink {
         for missing in overdue_missing {
             debug!(
                 "sending LinkMissing {}: {:?}",
-                MsgId(missing.msgid),
+                PayloadId(missing.payloadid),
                 missing.fragndx,
             );
             let link_frame = LinkFrame {
@@ -255,7 +255,7 @@ impl SerialLink {
     async fn handle_fragment(linkref: &SerialLinkRef, frag: LinkFrag) {
         debug!(
             "received LinkFrag {}: {}/{} payload sz: {}",
-            MsgId(frag.msgid),
+            PayloadId(frag.payloadid),
             frag.fragndx,
             frag.numfrag,
             frag.data.len()
@@ -263,7 +263,7 @@ impl SerialLink {
         let inbound = true;
         let mut link = linkref.lock().await;
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
-            debug!("completed LinkFrag {}", MsgId(frag.msgid));
+            debug!("completed LinkFrag {}", PayloadId(frag.payloadid));
             if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
                 error!("failed to send message: {}", err);
             }
@@ -274,7 +274,7 @@ impl SerialLink {
     async fn handle_missing(linkref: &SerialLinkRef, missing: LinkMissing) {
         debug!(
             "received LinkMissing {}: {:?}",
-            MsgId(missing.msgid),
+            PayloadId(missing.payloadid),
             missing.fragndx,
         );
         let resends = {
@@ -284,7 +284,7 @@ impl SerialLink {
         for frag in resends {
             debug!(
                 "resending LinkFrag {}: {}/{} payload sz: {}",
-                frag.msgid,
+                frag.payloadid,
                 frag.fragndx,
                 frag.numfrag,
                 frag.data.len()
@@ -347,12 +347,12 @@ impl SerialLink {
     }
 
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let msgid: MsgId = msg.data.as_slice().into();
+        let plid: PayloadId = msg.data.as_slice().into();
         let data = &msg.data;
         let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
-                msgid: msgid.0,
+                payloadid: plid.0,
                 numfrag,
                 fragndx,
                 data: chunk.to_vec(),
@@ -372,7 +372,7 @@ impl SerialLink {
             // is a good spot to just `continue` w/o sending the packet ...
             debug!(
                 "sending LinkFrag {}: {}/{} payload sz: {}",
-                msgid,
+                plid,
                 fragndx,
                 numfrag,
                 chunk.len()

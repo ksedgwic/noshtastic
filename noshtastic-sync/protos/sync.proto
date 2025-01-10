@@ -3,22 +3,27 @@ syntax = "proto3";
 package noshtastic_sync;
 
 message SyncMessage {
-    uint32 version = 1;  // Protocol version
-    oneof payload {
-        Ping ping = 2;
-        Pong pong = 3;
-        RawNote raw_note = 4;
-    }
+  uint32 version = 1;  // Protocol version
+  oneof payload {
+    Ping ping = 2;
+    Pong pong = 3;
+    RawNote raw_note = 4;
+    NegentropyMessage negentropy = 5;
+  }
 }
 
 message Ping {
-    uint32 id = 1;
+  uint32 id = 1;
 }
 
 message Pong {
-    uint32 id = 1;
+  uint32 id = 1;
 }
 
 message RawNote {
-    bytes data = 1;
+  bytes data = 1;
+}
+
+message NegentropyMessage {
+  bytes data = 1;
 }

@@ -20,14 +20,14 @@ message LinkMsg {
 
 // A fragment of a link message
 message LinkFrag {
-  fixed64 msgid = 1;	// Unique identifier for the message, common to the fragments
-  uint32 numfrag = 2;   // Total number of fragments in the packet
-  uint32 fragndx = 3;	// Index of this fragment (starting at 0)
-  bytes data = 4;	// Raw data buffer for this fragment
+  fixed64 payloadid = 1;	// Unique identifier for the message, common to the fragments
+  uint32 numfrag = 2;   	// Total number of fragments in the packet
+  uint32 fragndx = 3;		// Index of this fragment (starting at 0)
+  bytes data = 4;		// Raw data buffer for this fragment
 }
 
 // A missing fragment resend request
 message LinkMissing {
-  fixed64 msgid = 1;		// Unique identifier for the message, common to the fragments
+  fixed64 payloadid = 1;	// Unique identifier for the message, common to the fragments
   repeated uint32 fragndx = 2; 	// List of all missing fragments
 }
