@@ -5,6 +5,7 @@
 
 pub mod error;
 pub mod lruset;
+pub mod negentropy;
 pub mod sync;
 pub mod proto {
     include!("../protos/noshtastic_sync.rs");
@@ -14,5 +15,5 @@ pub use error::*;
 pub use lruset::LruSet;
 pub use proto::sync_message::Payload;
 pub use proto::SyncMessage;
-pub use proto::{Ping, Pong, RawNote};
+pub use proto::{NegentropyMessage, Ping, Pong, RawNote};
 pub use sync::Sync;

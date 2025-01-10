@@ -7,7 +7,7 @@ use log::*;
 use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
 use std::{
-    fmt::Debug,
+    fmt,
     sync::{Arc, Mutex},
 };
 use tokio::{
@@ -18,15 +18,18 @@ use tokio::{
 
 use noshtastic_link::{self, LinkMessage, PayloadId};
 
-use crate::{LruSet, Payload, Ping, Pong, RawNote, SyncError, SyncMessage, SyncResult};
+use crate::{
+    negentropy::NegentropyState, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
+    SyncError, SyncMessage, SyncResult,
+};
 
-#[derive(Debug)]
 pub struct Sync {
     ndb: Ndb,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
     recently_inserted: LruSet<PayloadId>,
+    negentropy: NegentropyState,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -43,10 +46,40 @@ impl Sync {
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
+            negentropy: NegentropyState::new(ndb.clone()),
         }));
         Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
         Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
+        Self::start_negentropy_sync(syncref.clone(), stop_signal.clone())?;
         Ok(syncref)
+    }
+
+    fn start_negentropy_sync(syncref: SyncRef, stop_signal: Arc<Notify>) -> SyncResult<()> {
+        task::spawn(async move {
+            debug!("negentropy sync starting");
+            sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
+            let mut interval = time::interval(Duration::from_secs(60));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let mut sync = syncref.lock().unwrap();
+                        match sync.negentropy.initiate() {
+                            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
+                            Ok(negbytes) =>
+                                if let Err(err) = sync.send_negentropy_message(&negbytes) {
+                                    error!("trouble sending negentropy message: {:?}", err);
+                                },
+                        }
+                    }
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+                }
+            }
+            debug!("negentropy sync stopping");
+        });
+
+        Ok(())
     }
 
     fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
@@ -154,6 +187,25 @@ impl Sync {
                 info!("received RawNote sz: {}", raw_note.data.len());
                 sync.handle_raw_note(raw_note);
             }
+            Some(Payload::Negentropy(negmsg)) => {
+                info!("received NegentropyMessage sz: {}", negmsg.data.len());
+                let mut have_ids = vec![];
+                let mut need_ids = vec![];
+                match sync
+                    .negentropy
+                    .reconcile(&negmsg.data, &mut have_ids, &mut need_ids)
+                {
+                    Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
+                    Ok(None) => info!("synchronized with remote"),
+                    Ok(Some(nextmsg)) => {
+                        if let Err(err) = sync.send_negentropy_message(&nextmsg) {
+                            error!("trouble sending next negentropy message: {:?}", err);
+                        }
+                    }
+                }
+                debug!("have: {:?}", DebugVecId(have_ids));
+                debug!("need: {:?}", DebugVecId(need_ids));
+            }
             None => {
                 warn!("received SyncMessage with no payload");
             }
@@ -213,6 +265,14 @@ impl Sync {
         Ok(())
     }
 
+    fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
+        info!("sending NegentropyMessage sz: {}", data.len());
+        let negmsg = Payload::Negentropy(NegentropyMessage {
+            data: data.to_vec(),
+        });
+        self.queue_outgoing_message(Some(negmsg))
+    }
+
     fn send_raw_note(&self, eventbuf: &str) -> SyncResult<()> {
         info!("sending RawNote sz: {}", eventbuf.len());
         let raw_note = Payload::RawNote(RawNote {
@@ -265,5 +325,13 @@ impl Sync {
         }
         debug!("stopping pinger");
         Ok(())
+    }
+}
+
+pub struct DebugVecId(Vec<Vec<u8>>);
+impl fmt::Debug for DebugVecId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hex_strings: Vec<String> = self.0.iter().map(hex::encode).collect();
+        write!(f, "[{}]", hex_strings.join(", "))
     }
 }

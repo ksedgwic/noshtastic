@@ -1611,7 +1611,9 @@ dependencies = [
 name = "noshtastic-sync"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "log",
+ "negentropy 0.4.3",
  "noshtastic-link",
  "nostrdb",
  "prost",
