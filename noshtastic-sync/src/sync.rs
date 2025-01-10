@@ -273,7 +273,11 @@ impl Sync {
 
     fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
         let txn = Transaction::new(&self.ndb)?;
-        for id in needed {
+        for (ndx, id) in needed.iter().enumerate() {
+            // FIXME - only send 4 notes at a time because we overrun the radio
+            if ndx == 4 {
+                break;
+            }
             if id.len() == 32 {
                 let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
                 match self.ndb.get_note_by_id(&txn, id_array) {
