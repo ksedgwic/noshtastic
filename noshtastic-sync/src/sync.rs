@@ -100,11 +100,14 @@ impl Sync {
                 match ndb_clone.wait_for_notes(ndbsubid, max_notes).await {
                     Ok(notekeys) => {
                         info!("saw notekeys: {:?}", notekeys);
-                        let sync = syncref_clone.lock().unwrap();
-                        for notekey in notekeys {
-                            if let Err(err) = sync.relay_notekey(notekey) {
-                                error!("Error in relay_note: {:?}", err);
-                                // keep going for now
+                        // TEMPORARY - for now don't immediately send new notes
+                        if false {
+                            let sync = syncref_clone.lock().unwrap();
+                            for notekey in notekeys {
+                                if let Err(err) = sync.relay_notekey(notekey) {
+                                    error!("Error in relay_note: {:?}", err);
+                                    // keep going for now
+                                }
                             }
                         }
                     }

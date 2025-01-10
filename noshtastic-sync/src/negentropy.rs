@@ -41,13 +41,14 @@ impl NegentropyState {
             }
         }
         storage.seal()?;
-        Ok(Negentropy::new(storage, 0)?)
+        Ok(Negentropy::new(storage, 200)?)
     }
 
     pub(crate) fn initiate(&mut self) -> SyncResult<Vec<u8>> {
         debug!("initiate starting");
         let mut negentropy = self.compose_negentropy()?;
         let negmsg = negentropy.initiate()?;
+        negentropy.dump_query(&negmsg, std::io::stdout())?;
         Ok(negmsg.to_bytes())
     }
 
@@ -59,10 +60,11 @@ impl NegentropyState {
     ) -> SyncResult<Option<Vec<u8>>> {
         debug!("reconcile starting");
         let mut negentropy = self.compose_negentropy()?;
+        negentropy.dump_query(&Bytes::from_slice(inmsg), std::io::stdout())?;
         negentropy.set_initiator();
         let mut have_ids_tmp: Vec<negentropy::Id> = Vec::new();
         let mut need_ids_tmp: Vec<negentropy::Id> = Vec::new();
-        let negmsg = negentropy.reconcile_with_ids(
+        let maybe_negmsg = negentropy.reconcile_with_ids(
             &Bytes::from_slice(inmsg),
             &mut have_ids_tmp,
             &mut need_ids_tmp,
@@ -75,6 +77,9 @@ impl NegentropyState {
             .into_iter()
             .map(|id| id.to_bytes().to_vec())
             .collect();
-        Ok(negmsg.map(|bytes| bytes.to_vec()))
+        if let Some(negmsg) = &maybe_negmsg {
+            negentropy.dump_query(&negmsg, std::io::stdout())?;
+        }
+        Ok(maybe_negmsg.map(|bytes| bytes.to_vec()))
     }
 }

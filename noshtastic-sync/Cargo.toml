@@ -19,7 +19,7 @@ tokio = { workspace = true }
 tonic = { workspace = true }
 
 # unique dependencies
-negentropy = "0.4"
+negentropy = { git = "https://github.com/ksedgwic/rust-negentropy.git", rev = "ec19dbb4947fa7b0fbf900405a92bde504598ed1", features = ["tiny-frame"] }
 
 [build-dependencies]
 tonic-build = "0.8"
