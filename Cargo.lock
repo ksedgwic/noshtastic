@@ -1601,6 +1601,7 @@ name = "noshtastic-link"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "hex",
  "log",
  "meshtastic",
  "prost",

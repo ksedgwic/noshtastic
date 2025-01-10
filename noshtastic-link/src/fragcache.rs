@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{proto::LinkMissing, LinkFrag, LinkMsg, PayloadId};
+use crate::{proto::LinkMissing, LinkFrag, LinkMsg, MsgId};
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -24,7 +24,7 @@ struct PartialMsg {
 
 #[derive(Debug)]
 pub(crate) struct FragmentCache {
-    partials: BTreeMap<PayloadId, PartialMsg>,
+    partials: BTreeMap<MsgId, PartialMsg>,
 }
 
 impl FragmentCache {
@@ -36,24 +36,21 @@ impl FragmentCache {
 
     pub(crate) fn add_fragment(&mut self, frag: &LinkFrag, inbound: bool) -> Option<LinkMsg> {
         // Retrieve or create a new PartialMsg
-        let partial = self
-            .partials
-            .entry(PayloadId(frag.payloadid))
-            .or_insert_with(|| {
-                let timestamp = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs();
-                let frags = vec![Vec::new(); frag.numfrag as usize];
-                PartialMsg {
-                    inbound,
-                    created: timestamp,
-                    lasttry: timestamp, // not a retry, but used to schedulefirst retry
-                    nretries: 0,
-                    frags,
-                    completed: false,
-                }
-            });
+        let partial = self.partials.entry(MsgId(frag.msgid)).or_insert_with(|| {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs();
+            let frags = vec![Vec::new(); frag.numfrag as usize];
+            PartialMsg {
+                inbound,
+                created: timestamp,
+                lasttry: timestamp, // not a retry, but used to schedulefirst retry
+                nretries: 0,
+                frags,
+                completed: false,
+            }
+        });
 
         // Update the fragment
         if frag.fragndx < partial.frags.len() as u32 {
@@ -63,24 +60,23 @@ impl FragmentCache {
             return None; // Invalid fragment index
         }
 
-        if !partial.completed {
-            if inbound {
-                // Check if all fragments are present
-                if partial.frags.iter().all(|f| !f.is_empty()) {
-                    // Assemble the complete message
-                    let mut complete_data = Vec::new();
-                    for fragment in &partial.frags {
-                        complete_data.extend_from_slice(fragment);
-                    }
-
-                    // we don't purge the PartialMsg right away so it will be
-                    // available if other nodes need retries
-
-                    partial.completed = true;
-                    return Some(LinkMsg {
-                        data: complete_data,
-                    });
+        if !partial.completed && inbound {
+            // Check if all fragments are present
+            if partial.frags.iter().all(|f| !f.is_empty()) {
+                // Assemble the complete message
+                let mut complete_data = Vec::new();
+                for fragment in &partial.frags {
+                    complete_data.extend_from_slice(fragment);
                 }
+
+                // we don't purge the PartialMsg right away so it will be
+                // available if other nodes need retries
+
+                partial.completed = true;
+                return Some(LinkMsg {
+                    msgid: frag.msgid,
+                    data: complete_data,
+                });
             }
         }
 
@@ -113,7 +109,7 @@ impl FragmentCache {
                 if !missing_indices.is_empty() {
                     partial.lasttry = now;
                     missing_requests.push(LinkMissing {
-                        payloadid: plid.0,
+                        msgid: plid.0,
                         fragndx: missing_indices,
                     });
                 }
@@ -127,12 +123,12 @@ impl FragmentCache {
     // any of the needed fragments that we have.
     pub(crate) fn fulfill_missing(&self, missing: LinkMissing) -> Vec<LinkFrag> {
         let mut fragments_to_send = Vec::new();
-        if let Some(partial) = self.partials.get(&PayloadId(missing.payloadid)) {
+        if let Some(partial) = self.partials.get(&MsgId(missing.msgid)) {
             for &fragndx in &missing.fragndx {
                 if let Some(fragment) = partial.frags.get(fragndx as usize) {
                     if !fragment.is_empty() {
                         fragments_to_send.push(LinkFrag {
-                            payloadid: missing.payloadid,
+                            msgid: missing.msgid,
                             numfrag: partial.frags.len() as u32,
                             fragndx,
                             data: fragment.clone(),
