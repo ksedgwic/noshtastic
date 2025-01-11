@@ -15,12 +15,13 @@ message LinkFrame {
 
 // A complete link message (not fragmented)
 message LinkMsg {
-  bytes data = 1;
+  fixed64 msgid = 1;		// Truncated nostr msgid (or hash for others)
+  bytes data = 2;
 }
 
 // A fragment of a link message
 message LinkFrag {
-  fixed64 payloadid = 1;	// Unique identifier for the message, common to the fragments
+  fixed64 msgid = 1;		// Truncated nostr msgid (or hash for others)
   uint32 numfrag = 2;   	// Total number of fragments in the packet
   uint32 fragndx = 3;		// Index of this fragment (starting at 0)
   bytes data = 4;		// Raw data buffer for this fragment
@@ -28,6 +29,6 @@ message LinkFrag {
 
 // A missing fragment resend request
 message LinkMissing {
-  fixed64 payloadid = 1;	// Unique identifier for the message, common to the fragments
+  fixed64 msgid = 1;		// Truncated nostr msgid (or hash for others)
   repeated uint32 fragndx = 2; 	// List of all missing fragments
 }

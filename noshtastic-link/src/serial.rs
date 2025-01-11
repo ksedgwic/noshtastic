@@ -7,9 +7,7 @@ use async_trait::async_trait;
 use log::*;
 use meshtastic::{
     api::{ConnectedStreamApi, StreamApi},
-    packet::{PacketDestination, PacketRouter},
     protobufs::{from_radio, mesh_packet, FromRadio, MeshPacket, PortNum},
-    types::NodeId,
     utils,
 };
 use prost::Message;
@@ -17,12 +15,13 @@ use std::{process, sync::Arc};
 use tokio::{
     sync::{mpsc, Mutex, Notify},
     task,
-    time::{self, sleep, Duration},
+    time::{self, Duration},
 };
 
 use crate::{
-    proto::LinkMissing, FragmentCache, LinkError, LinkFrag, LinkFrame, LinkMessage, LinkMsg,
-    LinkRef, LinkResult, MeshtasticLink, Payload, PayloadId,
+    outgoing::Outgoing, proto::LinkMissing, Action, FragmentCache, LinkError, LinkFrag, LinkFrame,
+    LinkMessage, LinkMsg, LinkOptionsBuilder, LinkRef, LinkResult, MeshtasticLink, MsgId, Payload,
+    Priority,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -31,11 +30,12 @@ const LINK_FRAG_THRESH: usize = 200;
 
 #[derive(Debug)]
 pub(crate) struct SerialLink {
-    stream_api: ConnectedStreamApi,
+    pub(crate) stream_api: ConnectedStreamApi,
     client_out_tx: mpsc::Sender<LinkMessage>,
     _stop_signal: Arc<Notify>,
-    my_node_num: u32,
+    pub(crate) my_node_num: u32,
     fragcache: FragmentCache,
+    outgoing: Outgoing,
 }
 pub(crate) type SerialLinkRef = Arc<tokio::sync::Mutex<SerialLink>>;
 
@@ -51,6 +51,7 @@ impl SerialLink {
             _stop_signal: stop_signal,
             my_node_num: 0,
             fragcache: FragmentCache::new(),
+            outgoing: Outgoing::new(),
         }
     }
 
@@ -123,6 +124,11 @@ impl SerialLink {
         SerialLink::start_mesh_listener(slinkref.clone(), mesh_in_rx, stop_signal.clone())?;
         SerialLink::start_client_listener(slinkref.clone(), client_in_rx, stop_signal.clone())?;
         SerialLink::start_fragchache_periodic(slinkref.clone(), stop_signal.clone())?;
+        slinkref
+            .lock()
+            .await
+            .outgoing
+            .start_regulator(slinkref.clone())?;
 
         Ok((slinkref, client_in_tx, client_out_rx))
     }
@@ -172,25 +178,31 @@ impl SerialLink {
     }
 
     async fn send_fragment_retries(linkref: SerialLinkRef) {
-        let overdue_missing = {
-            // need to drop the linkref lock so we don't deadlock below
-            linkref.lock().await.fragcache.overdue_missing()
-        };
-        for missing in overdue_missing {
-            debug!(
-                "sending LinkMissing {}: {:?}",
-                PayloadId(missing.payloadid),
-                missing.fragndx,
-            );
+        let mut link = linkref.lock().await;
+        for missing in link.fragcache.overdue_missing() {
+            let msgid = MsgId::new(missing.msgid, None);
+            let fragndx = missing.fragndx.clone();
             let link_frame = LinkFrame {
                 magic: LINK_MAGIC,
                 version: LINK_VERSION,
                 payload: Some(Payload::Missing(missing)),
             };
-            if let Err(err) = Self::send_link_frame(linkref.clone(), link_frame).await {
-                error!("send_fragment_retries: send_link_frame failed: {:?}", err);
-                // keep going for now
-            }
+
+            let outcome = link
+                .outgoing
+                .enqueue(
+                    msgid,
+                    link_frame,
+                    LinkOptionsBuilder::new()
+                        .priority(Priority::High)
+                        .action(Action::Replace)
+                        .build(),
+                )
+                .await;
+            debug!(
+                "queueing LinkMissing {}: {:?} => {}",
+                msgid, fragndx, outcome
+            );
         }
     }
 
@@ -242,7 +254,8 @@ impl SerialLink {
     // Handle unfragmented messages
     async fn handle_complete(linkref: &SerialLinkRef, linkmsg: LinkMsg) {
         debug!(
-            "received complete LinkMsg w/ payload sz: {}",
+            "received complete LinkMsg {} w/ payload sz: {}",
+            MsgId::new(linkmsg.msgid, None),
             linkmsg.data.len()
         );
         let link = linkref.lock().await;
@@ -253,17 +266,17 @@ impl SerialLink {
 
     // Handle fragmented messages
     async fn handle_fragment(linkref: &SerialLinkRef, frag: LinkFrag) {
+        let msgid = MsgId::new(frag.msgid, Some(frag.fragndx));
         debug!(
-            "received LinkFrag {}: {}/{} payload sz: {}",
-            PayloadId(frag.payloadid),
-            frag.fragndx,
+            "received LinkFrag {}/{} payload sz: {}",
+            msgid,
             frag.numfrag,
             frag.data.len()
         );
         let inbound = true;
         let mut link = linkref.lock().await;
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
-            debug!("completed LinkFrag {}", PayloadId(frag.payloadid));
+            debug!("completed LinkFrag {}", msgid);
             if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
                 error!("failed to send message: {}", err);
             }
@@ -272,32 +285,34 @@ impl SerialLink {
 
     // Handle requests for missing fragments
     async fn handle_missing(linkref: &SerialLinkRef, missing: LinkMissing) {
-        debug!(
-            "received LinkMissing {}: {:?}",
-            PayloadId(missing.payloadid),
-            missing.fragndx,
-        );
-        let resends = {
-            // need to drop the linkref lock so we don't deadlock below
-            linkref.lock().await.fragcache.fulfill_missing(missing)
-        };
-        for frag in resends {
-            debug!(
-                "resending LinkFrag {}: {}/{} payload sz: {}",
-                frag.payloadid,
-                frag.fragndx,
-                frag.numfrag,
-                frag.data.len()
-            );
+        let msgid = MsgId::new(missing.msgid, None);
+        debug!("received LinkMissing {}: {:?}", msgid, missing.fragndx);
+        let mut link = linkref.lock().await;
+        for frag in link.fragcache.fulfill_missing(missing) {
+            let fragndx = frag.fragndx;
+            let numfrag = frag.numfrag;
+            let fraglen = frag.data.len();
             let link_frame = LinkFrame {
                 magic: LINK_MAGIC,
                 version: LINK_VERSION,
                 payload: Some(Payload::Fragment(frag)),
             };
-            if let Err(err) = Self::send_link_frame(linkref.clone(), link_frame).await {
-                error!("handle_missing: send_link_frame failed: {:?}", err);
-                // keep going for now
-            }
+            let msgid = MsgId::new(msgid.base, Some(fragndx));
+            let outcome = link
+                .outgoing
+                .enqueue(
+                    msgid,
+                    link_frame,
+                    LinkOptionsBuilder::new()
+                        .priority(Priority::High)
+                        .action(Action::Replace)
+                        .build(),
+                )
+                .await;
+            debug!(
+                "requeueing LinkFrag {}/{} payload sz: {} => {}",
+                msgid, numfrag, fraglen, outcome
+            );
         }
     }
 
@@ -335,6 +350,7 @@ impl SerialLink {
 
     async fn send_complete(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
         let link_msg = LinkMsg {
+            msgid: msg.msgid.base,
             data: msg.data.clone(),
         };
         let link_frame = LinkFrame {
@@ -342,89 +358,55 @@ impl SerialLink {
             version: LINK_VERSION,
             payload: Some(Payload::Complete(link_msg)),
         };
-        debug!("sending complete LinkMsg w/ payload sz: {}", msg.data.len());
-        Self::send_link_frame(linkref, link_frame).await
+        let mut link = linkref.lock().await;
+        let outcome = link
+            .outgoing
+            .enqueue(msg.msgid, link_frame, msg.options)
+            .await;
+        debug!(
+            "queueing complete LinkMsg {} w/ payload sz: {} => {}",
+            msg.msgid,
+            msg.data.len(),
+            outcome
+        );
+        Ok(())
     }
 
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let plid: PayloadId = msg.data.as_slice().into();
         let data = &msg.data;
         let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
+        let mut link = linkref.lock().await;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
-                payloadid: plid.0,
+                msgid: msg.msgid.base,
                 numfrag,
                 fragndx,
                 data: chunk.to_vec(),
             };
             let inbound = false;
-            linkref
-                .lock()
-                .await
-                .fragcache
-                .add_fragment(&link_frag, inbound);
+            link.fragcache.add_fragment(&link_frag, inbound);
             let link_frame = LinkFrame {
                 magic: LINK_MAGIC,
                 version: LINK_VERSION,
                 payload: Some(Payload::Fragment(link_frag)),
             };
+
             // If you are trying to induce packet failure to test retries this
             // is a good spot to just `continue` w/o sending the packet ...
+
+            let msgid = MsgId::new(msg.msgid.base, Some(fragndx));
+            let outcome = link
+                .outgoing
+                .enqueue(msgid, link_frame, msg.options.clone())
+                .await;
             debug!(
-                "sending LinkFrag {}: {}/{} payload sz: {}",
-                plid,
-                fragndx,
+                "queueing LinkFrag {}/{} payload sz: {} => {}",
+                msgid,
                 numfrag,
-                chunk.len()
+                chunk.len(),
+                outcome
             );
-            Self::send_link_frame(linkref.clone(), link_frame).await?;
         }
-        Ok(())
-    }
-
-    async fn send_link_frame(linkref: SerialLinkRef, frame: LinkFrame) -> LinkResult<()> {
-        // Serialize the LinkFrame into bytes
-        let mut buffer = Vec::new();
-        frame.encode(&mut buffer).map_err(|err| {
-            LinkError::internal_error(format!("send_link_message: encode error: {:?}", err))
-        })?;
-
-        let mut link = linkref.lock().await;
-
-        debug!("sending LinkFrame, encoded sz: {}", buffer.len());
-        let mut router = LinkPacketRouter {
-            my_id: link.my_node_num.into(),
-        };
-        let port_num = PortNum::PrivateApp;
-        let destination = PacketDestination::Broadcast;
-        let channel = 0.into();
-        let want_ack = false;
-        let want_response = false;
-        let echo_response = false;
-        let reply_id: Option<u32> = None;
-        let emoji: Option<u32> = None;
-        if let Err(err) = link
-            .stream_api
-            .send_mesh_packet(
-                &mut router,
-                buffer.into(),
-                port_num,
-                destination,
-                channel,
-                want_ack,
-                want_response,
-                echo_response,
-                reply_id,
-                emoji,
-            )
-            .await
-        {
-            error!("send_mesh_packet failed {:?}", err);
-        }
-
-        // don't send packets back to back
-        sleep(Duration::from_secs(2)).await;
-
         Ok(())
     }
 }
@@ -432,24 +414,4 @@ impl SerialLink {
 #[async_trait]
 impl MeshtasticLink for SerialLink {
     // maybe not needed?
-}
-
-struct LinkPacketRouter {
-    my_id: NodeId,
-}
-
-impl PacketRouter<(), LinkError> for LinkPacketRouter {
-    fn handle_packet_from_radio(&mut self, packet: FromRadio) -> Result<(), LinkError> {
-        dbg!(packet);
-        Ok(())
-    }
-
-    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<(), LinkError> {
-        dbg!(packet);
-        Ok(())
-    }
-
-    fn source_node_id(&self) -> NodeId {
-        self.my_id
-    }
 }

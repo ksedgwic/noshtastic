@@ -16,7 +16,9 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 
-use noshtastic_link::{self, LinkMessage, PayloadId};
+use noshtastic_link::{
+    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
+};
 
 use crate::{
     negentropy::NegentropyState, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
@@ -28,7 +30,7 @@ pub struct Sync {
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
-    recently_inserted: LruSet<PayloadId>,
+    recently_inserted: LruSet<MsgId>,
     negentropy: NegentropyState,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
@@ -67,7 +69,7 @@ impl Sync {
                             Err(err) => error!("trouble in negentropy initiate: {:?}", err),
                             Ok(negbytes) =>
                                 if let Err(err) = sync.send_negentropy_message(&negbytes) {
-                                    error!("trouble sending negentropy message: {:?}", err);
+                                    error!("trouble queueing negentropy message: {:?}", err);
                                 },
                         }
                     }
@@ -131,15 +133,14 @@ impl Sync {
         match self.ndb.get_note_by_key(&txn, notekey) {
             Ok(note) => {
                 let note_json = note.json()?;
-                // use the links's PayloadId because it's a good size
-                let msgid: PayloadId = note_json.as_bytes().into();
+                let msgid = MsgId::from_nostr_msgid(note.id());
                 if self.recently_inserted.contains(&msgid) {
-                    // we don't need to automatically send messages
-                    // that we just heard from the mesh
+                    // we don't want send messages that we just heard
+                    // from the mesh
                     debug!("suppressing send of recently inserted {}", msgid);
                 } else {
                     dbg!(&note_json);
-                    self.send_raw_note(&note_json)?;
+                    self.send_raw_note(MsgId::from_nostr_msgid(note.id()), &note_json)?;
                 }
             }
             Err(err) => error!("error in get_note_by_key: {:?}", err),
@@ -156,9 +157,11 @@ impl Sync {
             info!("sync message handler starting");
             loop {
                 tokio::select! {
-                    Some(message) = receiver.recv() => {
-                        match SyncMessage::decode(message.to_bytes()) {
-                            Ok(decoded) => Self::handle_sync_message(syncref.clone(), decoded),
+                    Some(msg) = receiver.recv() => {
+                        match SyncMessage::decode(&msg.data[..]) {
+                            Ok(decoded) => {
+                                Self::handle_sync_message(syncref.clone(), msg.msgid, decoded)
+                            },
                             Err(e) => error!("Failed to decode message: {}", e),
                         }
                     }
@@ -172,14 +175,14 @@ impl Sync {
         });
     }
 
-    fn handle_sync_message(syncref: SyncRef, message: SyncMessage) {
+    fn handle_sync_message(syncref: SyncRef, msgid: MsgId, message: SyncMessage) {
         let mut sync = syncref.lock().unwrap();
         match message.payload {
             Some(Payload::Ping(ping)) => {
                 info!("received Ping id: {}", ping.id);
                 Sync::after_delay(syncref.clone(), Duration::from_secs(1), move |sync| {
                     if let Err(err) = sync.send_pong(ping.id) {
-                        error!("trouble sending pong: {:?}", err);
+                        error!("trouble queueing pong: {:?}", err);
                     }
                 })
             }
@@ -187,8 +190,8 @@ impl Sync {
                 info!("received Pong id: {}", pong.id);
             }
             Some(Payload::RawNote(raw_note)) => {
-                info!("received RawNote sz: {}", raw_note.data.len());
-                sync.handle_raw_note(raw_note);
+                info!("received RawNote {} sz: {}", msgid, raw_note.data.len());
+                sync.handle_raw_note(msgid, raw_note);
             }
             Some(Payload::Negentropy(negmsg)) => {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
@@ -202,7 +205,7 @@ impl Sync {
                     Ok(None) => info!("synchronized with remote"),
                     Ok(Some(nextmsg)) => {
                         if let Err(err) = sync.send_negentropy_message(&nextmsg) {
-                            error!("trouble sending next negentropy message: {:?}", err);
+                            error!("trouble queueing next negentropy message: {:?}", err);
                         }
                     }
                 }
@@ -218,14 +221,12 @@ impl Sync {
         }
     }
 
-    fn handle_raw_note(&mut self, raw_note: RawNote) {
+    fn handle_raw_note(&mut self, msgid: MsgId, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
-            debug!("saw RawNote: {}", utf8_str);
+            debug!("saw RawNote {}: {}", msgid, utf8_str);
             if let Err(err) = self.ndb.process_client_event(utf8_str) {
                 error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
             }
-            // use the links's PayloadId because it's a good size
-            let msgid: PayloadId = utf8_str.as_bytes().into();
             self.recently_inserted.insert(msgid);
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
@@ -244,7 +245,12 @@ impl Sync {
         });
     }
 
-    fn queue_outgoing_message(&self, payload: Option<Payload>) -> SyncResult<()> {
+    fn queue_outgoing_message(
+        &self,
+        msgid: MsgId,
+        payload: Option<Payload>,
+        options: LinkOptions,
+    ) -> SyncResult<()> {
         // Create a SyncMessage
         let message = SyncMessage {
             version: 1, // Protocol version
@@ -260,7 +266,15 @@ impl Sync {
         // queue the outgoing message, this shouldn't block
         task::block_in_place(|| {
             let runtime = tokio::runtime::Handle::current();
-            runtime.block_on(async { self.link_tx.send(buffer.into()).await })
+            runtime.block_on(async {
+                self.link_tx
+                    .send(LinkMessage {
+                        msgid,
+                        data: buffer,
+                        options,
+                    })
+                    .await
+            })
         })
         .map_err(|err| {
             SyncError::internal_error(format!(
@@ -273,15 +287,17 @@ impl Sync {
 
     fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
         let txn = Transaction::new(&self.ndb)?;
-        for id in needed {
+        for id in needed.iter() {
             if id.len() == 32 {
                 let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
                 match self.ndb.get_note_by_id(&txn, id_array) {
                     Err(err) => error!("trouble in get_note_by_id: {:?}", err),
                     Ok(note) => {
                         if let Ok(note_json) = note.json() {
-                            if let Err(err) = self.send_raw_note(&note_json) {
-                                error!("trouble sending needed raw note: {:?}", err);
+                            if let Err(err) =
+                                self.send_raw_note(MsgId::from_nostr_msgid(note.id()), &note_json)
+                            {
+                                error!("trouble queueing needed raw note: {:?}", err);
                                 // keep going
                             }
                         }
@@ -292,30 +308,50 @@ impl Sync {
         Ok(())
     }
 
+    // well-known message ids
+    const ID_PING: u64 = 1;
+    const ID_PONG: u64 = 2;
+    const ID_NEGENTROPY: u64 = 3;
+
     fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
-        info!("sending NegentropyMessage sz: {}", data.len());
+        info!("queueing NegentropyMessage sz: {}", data.len());
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        self.queue_outgoing_message(Some(negmsg))
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_NEGENTROPY, None),
+            Some(negmsg),
+            LinkOptionsBuilder::new()
+                .priority(Priority::Low)
+                .action(Action::Replace)
+                .build(),
+        )
     }
 
-    fn send_raw_note(&self, note_json: &str) -> SyncResult<()> {
-        info!("sending RawNote sz: {}", note_json.len());
+    fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
+        info!("queueing RawNote {} sz: {}", msgid, note_json.len());
         let raw_note = Payload::RawNote(RawNote {
             data: note_json.as_bytes().to_vec(),
         });
-        self.queue_outgoing_message(Some(raw_note))
+        self.queue_outgoing_message(msgid, Some(raw_note), LinkOptionsBuilder::new().build())
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
-        info!("sending Ping id: {}", ping_id);
-        self.queue_outgoing_message(Some(Payload::Ping(Ping { id: ping_id })))
+        info!("queueing Ping id: {}", ping_id);
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_PING, None),
+            Some(Payload::Ping(Ping { id: ping_id })),
+            LinkOptionsBuilder::new().build(),
+        )
     }
 
     fn send_pong(&self, pong_id: u32) -> SyncResult<()> {
-        info!("sending Pong id: {}", pong_id);
-        self.queue_outgoing_message(Some(Payload::Pong(Pong { id: pong_id })))
+        info!("queueing Pong id: {}", pong_id);
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_PONG, None),
+            Some(Payload::Pong(Pong { id: pong_id })),
+            LinkOptionsBuilder::new().build(),
+        )
     }
 
     pub fn start_pinging(syncref: SyncRef, duration: Duration) -> SyncResult<()> {

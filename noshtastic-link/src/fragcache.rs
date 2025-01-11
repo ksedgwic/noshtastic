@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{proto::LinkMissing, LinkFrag, LinkMsg, PayloadId};
+use crate::{proto::LinkMissing, LinkFrag, LinkMsg, MsgId};
 
 #[allow(dead_code)] // FIXME - remove this asap
 #[derive(Debug)]
@@ -18,12 +18,13 @@ struct PartialMsg {
     created: u64, // first seen
     lasttry: u64, // last retry
     nretries: u32,
+    completed: bool,     // don't need to upcall to client more than once
     frags: Vec<Vec<u8>>, // missing fragments are zero-sized
 }
 
 #[derive(Debug)]
 pub(crate) struct FragmentCache {
-    partials: BTreeMap<PayloadId, PartialMsg>,
+    partials: BTreeMap<MsgId, PartialMsg>,
 }
 
 impl FragmentCache {
@@ -37,7 +38,7 @@ impl FragmentCache {
         // Retrieve or create a new PartialMsg
         let partial = self
             .partials
-            .entry(PayloadId(frag.payloadid))
+            .entry(MsgId::new(frag.msgid, None))
             .or_insert_with(|| {
                 let timestamp = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -50,6 +51,7 @@ impl FragmentCache {
                     lasttry: timestamp, // not a retry, but used to schedulefirst retry
                     nretries: 0,
                     frags,
+                    completed: false,
                 }
             });
 
@@ -61,7 +63,7 @@ impl FragmentCache {
             return None; // Invalid fragment index
         }
 
-        if inbound {
+        if !partial.completed && inbound {
             // Check if all fragments are present
             if partial.frags.iter().all(|f| !f.is_empty()) {
                 // Assemble the complete message
@@ -73,14 +75,16 @@ impl FragmentCache {
                 // we don't purge the PartialMsg right away so it will be
                 // available if other nodes need retries
 
-                // Return the complete LinkMsg
+                partial.completed = true;
                 return Some(LinkMsg {
+                    msgid: frag.msgid,
                     data: complete_data,
                 });
             }
         }
 
-        // Return None if the message is not yet complete
+        // Return None if the message is not yet complete or has
+        // already been returned previously as completed
         None
     }
 
@@ -93,9 +97,10 @@ impl FragmentCache {
             .as_secs();
 
         let mut missing_requests = Vec::new();
+        let overdue_seconds = 60;
 
-        for (&plid, partial) in &mut self.partials {
-            if partial.inbound && now >= partial.lasttry + 10 {
+        for (&msgid, partial) in &mut self.partials {
+            if partial.inbound && now >= partial.lasttry + overdue_seconds {
                 // Collect indices of missing fragments
                 let missing_indices: Vec<u32> = partial
                     .frags
@@ -108,7 +113,7 @@ impl FragmentCache {
                 if !missing_indices.is_empty() {
                     partial.lasttry = now;
                     missing_requests.push(LinkMissing {
-                        payloadid: plid.0,
+                        msgid: msgid.base,
                         fragndx: missing_indices,
                     });
                 }
@@ -122,12 +127,12 @@ impl FragmentCache {
     // any of the needed fragments that we have.
     pub(crate) fn fulfill_missing(&self, missing: LinkMissing) -> Vec<LinkFrag> {
         let mut fragments_to_send = Vec::new();
-        if let Some(partial) = self.partials.get(&PayloadId(missing.payloadid)) {
+        if let Some(partial) = self.partials.get(&MsgId::new(missing.msgid, None)) {
             for &fragndx in &missing.fragndx {
                 if let Some(fragment) = partial.frags.get(fragndx as usize) {
                     if !fragment.is_empty() {
                         fragments_to_send.push(LinkFrag {
-                            payloadid: missing.payloadid,
+                            msgid: missing.msgid,
                             numfrag: partial.frags.len() as u32,
                             fragndx,
                             data: fragment.clone(),
