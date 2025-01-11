@@ -16,7 +16,9 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 
-use noshtastic_link::{self, LinkMessage, MsgId};
+use noshtastic_link::{
+    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
+};
 
 use crate::{
     negentropy::NegentropyState, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
@@ -67,7 +69,7 @@ impl Sync {
                             Err(err) => error!("trouble in negentropy initiate: {:?}", err),
                             Ok(negbytes) =>
                                 if let Err(err) = sync.send_negentropy_message(&negbytes) {
-                                    error!("trouble sending negentropy message: {:?}", err);
+                                    error!("trouble queueing negentropy message: {:?}", err);
                                 },
                         }
                     }
@@ -180,7 +182,7 @@ impl Sync {
                 info!("received Ping id: {}", ping.id);
                 Sync::after_delay(syncref.clone(), Duration::from_secs(1), move |sync| {
                     if let Err(err) = sync.send_pong(ping.id) {
-                        error!("trouble sending pong: {:?}", err);
+                        error!("trouble queueing pong: {:?}", err);
                     }
                 })
             }
@@ -203,7 +205,7 @@ impl Sync {
                     Ok(None) => info!("synchronized with remote"),
                     Ok(Some(nextmsg)) => {
                         if let Err(err) = sync.send_negentropy_message(&nextmsg) {
-                            error!("trouble sending next negentropy message: {:?}", err);
+                            error!("trouble queueing next negentropy message: {:?}", err);
                         }
                     }
                 }
@@ -243,7 +245,12 @@ impl Sync {
         });
     }
 
-    fn queue_outgoing_message(&self, msgid: MsgId, payload: Option<Payload>) -> SyncResult<()> {
+    fn queue_outgoing_message(
+        &self,
+        msgid: MsgId,
+        payload: Option<Payload>,
+        options: LinkOptions,
+    ) -> SyncResult<()> {
         // Create a SyncMessage
         let message = SyncMessage {
             version: 1, // Protocol version
@@ -264,6 +271,7 @@ impl Sync {
                     .send(LinkMessage {
                         msgid,
                         data: buffer,
+                        options,
                     })
                     .await
             })
@@ -279,11 +287,7 @@ impl Sync {
 
     fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
         let txn = Transaction::new(&self.ndb)?;
-        for (ndx, id) in needed.iter().enumerate() {
-            // FIXME - only send 4 notes at a time because we overrun the radio
-            if ndx == 4 {
-                break;
-            }
+        for (_ndx, id) in needed.iter().enumerate() {
             if id.len() == 32 {
                 let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
                 match self.ndb.get_note_by_id(&txn, id_array) {
@@ -293,7 +297,7 @@ impl Sync {
                             if let Err(err) =
                                 self.send_raw_note(MsgId::from_nostr_msgid(note.id()), &note_json)
                             {
-                                error!("trouble sending needed raw note: {:?}", err);
+                                error!("trouble queueing needed raw note: {:?}", err);
                                 // keep going
                             }
                         }
@@ -304,30 +308,50 @@ impl Sync {
         Ok(())
     }
 
+    // well-known message ids
+    const ID_PING: u64 = 1;
+    const ID_PONG: u64 = 2;
+    const ID_NEGENTROPY: u64 = 3;
+
     fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
-        info!("sending NegentropyMessage sz: {}", data.len());
+        info!("queueing NegentropyMessage sz: {}", data.len());
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        self.queue_outgoing_message(MsgId::from(data), Some(negmsg))
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_NEGENTROPY, None),
+            Some(negmsg),
+            LinkOptionsBuilder::new()
+                .priority(Priority::Low)
+                .action(Action::Replace)
+                .build(),
+        )
     }
 
     fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
-        info!("sending RawNote {} sz: {}", msgid, note_json.len());
+        info!("queueing RawNote {} sz: {}", msgid, note_json.len());
         let raw_note = Payload::RawNote(RawNote {
             data: note_json.as_bytes().to_vec(),
         });
-        self.queue_outgoing_message(msgid, Some(raw_note))
+        self.queue_outgoing_message(msgid, Some(raw_note), LinkOptionsBuilder::new().build())
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
-        info!("sending Ping id: {}", ping_id);
-        self.queue_outgoing_message(MsgId(0), Some(Payload::Ping(Ping { id: ping_id })))
+        info!("queueing Ping id: {}", ping_id);
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_PING, None),
+            Some(Payload::Ping(Ping { id: ping_id })),
+            LinkOptionsBuilder::new().build(),
+        )
     }
 
     fn send_pong(&self, pong_id: u32) -> SyncResult<()> {
-        info!("sending Pong id: {}", pong_id);
-        self.queue_outgoing_message(MsgId(0), Some(Payload::Pong(Pong { id: pong_id })))
+        info!("queueing Pong id: {}", pong_id);
+        self.queue_outgoing_message(
+            MsgId::new(Self::ID_PONG, None),
+            Some(Payload::Pong(Pong { id: pong_id })),
+            LinkOptionsBuilder::new().build(),
+        )
     }
 
     pub fn start_pinging(syncref: SyncRef, duration: Duration) -> SyncResult<()> {
