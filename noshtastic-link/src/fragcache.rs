@@ -97,9 +97,10 @@ impl FragmentCache {
             .as_secs();
 
         let mut missing_requests = Vec::new();
+        let overdue_seconds = 60;
 
         for (&msgid, partial) in &mut self.partials {
-            if partial.inbound && now >= partial.lasttry + 10 {
+            if partial.inbound && now >= partial.lasttry + overdue_seconds {
                 // Collect indices of missing fragments
                 let missing_indices: Vec<u32> = partial
                     .frags

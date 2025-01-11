@@ -287,7 +287,7 @@ impl Sync {
 
     fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
         let txn = Transaction::new(&self.ndb)?;
-        for (_ndx, id) in needed.iter().enumerate() {
+        for id in needed.iter() {
             if id.len() == 32 {
                 let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
                 match self.ndb.get_note_by_id(&txn, id_array) {
