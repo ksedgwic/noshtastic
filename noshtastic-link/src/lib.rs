@@ -102,20 +102,6 @@ impl LinkMessage {
     }
 }
 
-// impl From<Vec<u8>> for LinkMessage {
-//     fn from(buffer: Vec<u8>) -> Self {
-//         LinkMessage { data: buffer }
-//     }
-// }
-
-// impl From<meshtastic::protobufs::FromRadio> for LinkMessage {
-//     fn from(from_radio: meshtastic::protobufs::FromRadio) -> Self {
-//         LinkMessage {
-//             data: from_radio.encode_to_vec(),
-//         }
-//     }
-// }
-
 impl From<LinkMsg> for LinkMessage {
     fn from(msg: LinkMsg) -> Self {
         LinkMessage {
