@@ -3,6 +3,7 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
+pub mod encoded_note;
 pub mod error;
 pub mod lruset;
 pub mod negentropy;
@@ -15,5 +16,7 @@ pub use error::*;
 pub use lruset::LruSet;
 pub use proto::sync_message::Payload;
 pub use proto::SyncMessage;
-pub use proto::{NegentropyMessage, Ping, Pong, RawNote};
+pub use proto::{
+    enc_string::StringType, EncNote, EncString, EncTag, NegentropyMessage, Ping, Pong, RawNote,
+};
 pub use sync::Sync;

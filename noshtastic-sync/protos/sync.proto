@@ -7,8 +7,9 @@ message SyncMessage {
   oneof payload {
     Ping ping = 2;
     Pong pong = 3;
-    RawNote raw_note = 4;
-    NegentropyMessage negentropy = 5;
+    NegentropyMessage negentropy = 4;
+    RawNote raw_note = 5;
+    EncNote enc_note = 6;
   }
 }
 
@@ -20,10 +21,33 @@ message Pong {
   uint32 id = 1;
 }
 
+message NegentropyMessage {
+  bytes data = 1;
+}
+
+// utf8 encoded json
 message RawNote {
   bytes data = 1;
 }
 
-message NegentropyMessage {
-  bytes data = 1;
+message EncNote {
+  bytes id = 1;
+  bytes pubkey = 2;
+  uint64 created_at = 3;
+  uint32 kind = 4;
+  repeated EncTag tags = 5;
+  string content = 6;
+  bytes sig = 7;
+}
+
+message EncTag {
+  repeated EncString elements = 1;
+}
+
+// used when the string might be a lower-case hex string (or not)
+message EncString {
+  oneof string_type {
+    string utf8_string = 1;   // utf8 string
+    bytes hex_encoded = 2;    // Hex-encoded data stored as bytes
+  }
 }
