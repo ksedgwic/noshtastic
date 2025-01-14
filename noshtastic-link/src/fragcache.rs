@@ -11,15 +11,45 @@ use std::{
 
 use crate::{proto::LinkMissing, LinkFrag, LinkMsg, MsgId};
 
-#[allow(dead_code)] // FIXME - remove this asap
+#[derive(Debug, Clone)]
+struct CachedFrag {
+    rotoff: u8,    // octet rotation offset for next send (see noshtastic:#15)
+    data: Vec<u8>, // data w/o any rotation
+}
+
+impl CachedFrag {
+    fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    fn rotate_octets(&mut self) -> (u8, Vec<u8>) {
+        let rotoff = self.rotoff;
+        self.rotoff = self.rotoff.wrapping_add(1);
+        (
+            rotoff,
+            self.data
+                .iter()
+                .map(|&byte| byte.wrapping_add(rotoff))
+                .collect(),
+        )
+    }
+
+    fn unrotate_octets(data: Vec<u8>, rotoff: u8) -> Vec<u8> {
+        data.into_iter()
+            .map(|byte| byte.wrapping_sub(rotoff))
+            .collect()
+    }
+}
+
+#[allow(dead_code)]
 #[derive(Debug)]
 struct PartialMsg {
     inbound: bool,
     created: u64, // first seen
     lasttry: u64, // last retry
     nretries: u32,
-    completed: bool,     // don't need to upcall to client more than once
-    frags: Vec<Vec<u8>>, // missing fragments are zero-sized
+    completed: bool, // don't need to upcall to client more than once
+    frags: Vec<CachedFrag>,
 }
 
 #[derive(Debug)]
@@ -44,7 +74,13 @@ impl FragmentCache {
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards")
                     .as_secs();
-                let frags = vec![Vec::new(); frag.numfrag as usize];
+                let frags = vec![
+                    CachedFrag {
+                        rotoff: 0,
+                        data: Vec::new(),
+                    };
+                    frag.numfrag as usize
+                ];
                 PartialMsg {
                     inbound,
                     created: timestamp,
@@ -57,7 +93,9 @@ impl FragmentCache {
 
         // Update the fragment
         if frag.fragndx < partial.frags.len() as u32 {
-            partial.frags[frag.fragndx as usize] = frag.data.clone();
+            // Unrotate the data before storing it in the fragment
+            let unrotated_data = CachedFrag::unrotate_octets(frag.data.clone(), frag.rotoff as u8);
+            partial.frags[frag.fragndx as usize].data = unrotated_data;
         } else {
             error!("invalid fragment index: {}", frag.fragndx);
             return None; // Invalid fragment index
@@ -69,7 +107,7 @@ impl FragmentCache {
                 // Assemble the complete message
                 let mut complete_data = Vec::new();
                 for fragment in &partial.frags {
-                    complete_data.extend_from_slice(fragment);
+                    complete_data.extend_from_slice(&fragment.data);
                 }
 
                 // we don't purge the PartialMsg right away so it will be
@@ -125,22 +163,32 @@ impl FragmentCache {
 
     // Respond to another node's LinkMissing request by returning
     // any of the needed fragments that we have.
-    pub(crate) fn fulfill_missing(&self, missing: LinkMissing) -> Vec<LinkFrag> {
+    pub(crate) fn fulfill_missing(&mut self, missing: LinkMissing) -> Vec<LinkFrag> {
         let mut fragments_to_send = Vec::new();
-        if let Some(partial) = self.partials.get(&MsgId::new(missing.msgid, None)) {
+
+        // Retrieve the PartialMsg if it exists
+        if let Some(partial) = self.partials.get_mut(&MsgId::new(missing.msgid, None)) {
             for &fragndx in &missing.fragndx {
-                if let Some(fragment) = partial.frags.get(fragndx as usize) {
-                    if !fragment.is_empty() {
-                        fragments_to_send.push(LinkFrag {
-                            msgid: missing.msgid,
-                            numfrag: partial.frags.len() as u32,
-                            fragndx,
-                            data: fragment.clone(),
-                        });
+                // Safely access the fragment by index
+                if let Some(fragment) = partial.frags.get_mut(fragndx as usize) {
+                    // Skip empty fragments
+                    if fragment.is_empty() {
+                        continue;
                     }
+
+                    // Rotate the octets and prepare the fragment for sending
+                    let (rotoff, data) = fragment.rotate_octets();
+                    fragments_to_send.push(LinkFrag {
+                        msgid: missing.msgid,
+                        numfrag: partial.frags.len() as u32,
+                        fragndx,
+                        rotoff: rotoff as u32,
+                        data,
+                    });
                 }
             }
         }
+
         fragments_to_send
     }
 }
