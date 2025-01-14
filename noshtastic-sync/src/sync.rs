@@ -16,12 +16,10 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 
-use noshtastic_link::{
-    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
-};
+use noshtastic_link::{self, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority};
 
 use crate::{
-    negentropy::NegentropyState, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
+    negentropy::NegentropyState, EncNote, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
     SyncError, SyncMessage, SyncResult,
 };
 
@@ -60,7 +58,7 @@ impl Sync {
         task::spawn(async move {
             debug!("negentropy sync starting");
             sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
-            let mut interval = time::interval(Duration::from_secs(60));
+            let mut interval = time::interval(Duration::from_secs(5 * 60));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -68,7 +66,7 @@ impl Sync {
                         match sync.negentropy.initiate() {
                             Err(err) => error!("trouble in negentropy initiate: {:?}", err),
                             Ok(negbytes) =>
-                                if let Err(err) = sync.send_negentropy_message(&negbytes) {
+                                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
                                     error!("trouble queueing negentropy message: {:?}", err);
                                 },
                         }
@@ -140,7 +138,7 @@ impl Sync {
                     debug!("suppressing send of recently inserted {}", msgid);
                 } else {
                     dbg!(&note_json);
-                    self.send_raw_note(MsgId::from_nostr_msgid(note.id()), &note_json)?;
+                    self.send_encoded_note(MsgId::from_nostr_msgid(note.id()), &note_json)?;
                 }
             }
             Err(err) => error!("error in get_note_by_key: {:?}", err),
@@ -193,6 +191,10 @@ impl Sync {
                 info!("received RawNote {} sz: {}", msgid, raw_note.data.len());
                 sync.handle_raw_note(msgid, raw_note);
             }
+            Some(Payload::EncNote(enc_note)) => {
+                info!("received EncNote {}", msgid);
+                sync.handle_enc_note(msgid, enc_note);
+            }
             Some(Payload::Negentropy(negmsg)) => {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
                 let mut have_ids = vec![];
@@ -204,7 +206,7 @@ impl Sync {
                     Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
                     Ok(None) => info!("synchronized with remote"),
                     Ok(Some(nextmsg)) => {
-                        if let Err(err) = sync.send_negentropy_message(&nextmsg) {
+                        if let Err(err) = sync.send_negentropy_message(&nextmsg, false) {
                             error!("trouble queueing next negentropy message: {:?}", err);
                         }
                     }
@@ -225,12 +227,27 @@ impl Sync {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
             debug!("saw RawNote {}: {}", msgid, utf8_str);
             if let Err(err) = self.ndb.process_client_event(utf8_str) {
-                error!("ndb process_client_event failed: {}: {:?}", &utf8_str, err);
+                error!(
+                    "ndb process_client_event (raw) failed: {}: {:?}",
+                    &utf8_str, err
+                );
             }
             self.recently_inserted.insert(msgid);
         } else {
             debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
         }
+    }
+
+    fn handle_enc_note(&mut self, msgid: MsgId, enc_note: EncNote) {
+        let utf8_str = enc_note.to_string();
+        debug!("saw EncNote {}: {}", msgid, utf8_str);
+        if let Err(err) = self.ndb.process_client_event(&utf8_str) {
+            error!(
+                "ndb process_client_event (enc) failed: {}: {:?}",
+                &utf8_str, err
+            );
+        }
+        self.recently_inserted.insert(msgid);
     }
 
     pub fn after_delay<F, T>(syncref: Arc<Mutex<T>>, delay: Duration, task: F)
@@ -294,8 +311,8 @@ impl Sync {
                     Err(err) => error!("trouble in get_note_by_id: {:?}", err),
                     Ok(note) => {
                         if let Ok(note_json) = note.json() {
-                            if let Err(err) =
-                                self.send_raw_note(MsgId::from_nostr_msgid(note.id()), &note_json)
+                            if let Err(err) = self
+                                .send_encoded_note(MsgId::from_nostr_msgid(note.id()), &note_json)
                             {
                                 error!("trouble queueing needed raw note: {:?}", err);
                                 // keep going
@@ -311,29 +328,43 @@ impl Sync {
     // well-known message ids
     const ID_PING: u64 = 1;
     const ID_PONG: u64 = 2;
-    const ID_NEGENTROPY: u64 = 3;
 
-    fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
-        info!("queueing NegentropyMessage sz: {}", data.len());
+    fn send_negentropy_message(&self, data: &[u8], is_initial: bool) -> SyncResult<()> {
+        info!(
+            "queueing NegentropyMessage, is_initial: {}, sz: {}",
+            is_initial,
+            data.len()
+        );
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
+        let priority = if is_initial {
+            // defer initial messages if we are busy
+            Priority::Low
+        } else {
+            // send response messages promptly
+            Priority::High
+        };
+        let msgid = MsgId::from(data);
         self.queue_outgoing_message(
-            MsgId::new(Self::ID_NEGENTROPY, None),
+            msgid,
             Some(negmsg),
-            LinkOptionsBuilder::new()
-                .priority(Priority::Low)
-                .action(Action::Replace)
-                .build(),
+            LinkOptionsBuilder::new().priority(priority).build(),
         )
     }
 
-    fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
-        info!("queueing RawNote {} sz: {}", msgid, note_json.len());
-        let raw_note = Payload::RawNote(RawNote {
-            data: note_json.as_bytes().to_vec(),
-        });
-        self.queue_outgoing_message(msgid, Some(raw_note), LinkOptionsBuilder::new().build())
+    // fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
+    //     info!("queueing RawNote {} sz: {}", msgid, note_json.len());
+    //     let raw_note = Payload::RawNote(RawNote {
+    //         data: note_json.as_bytes().to_vec(),
+    //     });
+    //     self.queue_outgoing_message(msgid, Some(raw_note), LinkOptionsBuilder::new().build())
+    // }
+
+    fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
+        info!("queueing EncNote {} sz: {}", msgid, note_json.len());
+        let enc_note = Payload::EncNote(EncNote::try_from(note_json)?);
+        self.queue_outgoing_message(msgid, Some(enc_note), LinkOptionsBuilder::new().build())
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {

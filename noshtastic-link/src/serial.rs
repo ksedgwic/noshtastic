@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkMissing, Action, FragmentCache, LinkError, LinkFrag, LinkFrame,
+    outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkError, LinkFrag, LinkFrame,
     LinkMessage, LinkMsg, LinkOptionsBuilder, LinkRef, LinkResult, MeshtasticLink, MsgId, Payload,
     Priority,
 };
@@ -193,10 +193,7 @@ impl SerialLink {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new()
-                        .priority(Priority::High)
-                        .action(Action::Replace)
-                        .build(),
+                    LinkOptionsBuilder::new().priority(Priority::High).build(),
                 )
                 .await;
             debug!(
@@ -224,7 +221,7 @@ impl SerialLink {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
         {
             if decoded.portnum() == PortNum::PrivateApp {
-                debug!("received LinkFrame, encoded sz: {}", decoded.payload.len());
+                debug!("received LinkFrame, sz: {}", decoded.payload.len());
                 match LinkFrame::decode(&*decoded.payload) {
                     Ok(link_frame) => Self::handle_link_frame(linkref, link_frame).await,
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
@@ -303,10 +300,7 @@ impl SerialLink {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new()
-                        .priority(Priority::High)
-                        .action(Action::Replace)
-                        .build(),
+                    LinkOptionsBuilder::new().priority(Priority::High).build(),
                 )
                 .await;
             debug!(

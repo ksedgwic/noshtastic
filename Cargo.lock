@@ -37,6 +37,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc7bb162ec39d46ab1ca8c77bf72e890535becd1751bb45f64c597edb4c8c6b3"
+
+[[package]]
+name = "alloc-stdlib"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94fb8275041c72129eb51b7d0322c29b8387a0386127718b096429201a5d6ece"
+dependencies = [
+ "alloc-no-stdlib",
+]
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -405,6 +420,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "brotli"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc97b8f16f944bba54f0433f07e30be199b6dc2bd25937444bbad560bcea29bd"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+ "brotli-decompressor",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a45bd2e4095a8b518033b128020dd4a55aab1c0a381ba4404a472630f4bc362"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -686,7 +722,7 @@ dependencies = [
  "bech32",
  "ewebsock",
  "hex",
- "nostr",
+ "nostr 0.37.0",
  "nostrdb",
  "serde",
  "serde_derive",
@@ -1617,12 +1653,16 @@ dependencies = [
 name = "noshtastic-sync"
 version = "0.1.0"
 dependencies = [
+ "brotli",
  "hex",
  "log",
  "negentropy 0.4.3 (git+https://github.com/ksedgwic/rust-negentropy.git?rev=ec19dbb4947fa7b0fbf900405a92bde504598ed1)",
  "noshtastic-link",
+ "nostr 0.38.0",
  "nostrdb",
  "prost",
+ "secp256k1",
+ "serde_json",
  "thiserror 2.0.9",
  "tokio",
  "tonic",
@@ -1649,6 +1689,32 @@ name = "nostr"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8aad4b767bbed24ac5eb4465bfb83bc1210522eb99d67cf4e547ec2ec7e47786"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bech32",
+ "bip39",
+ "bitcoin",
+ "cbc",
+ "chacha20",
+ "chacha20poly1305",
+ "getrandom",
+ "instant",
+ "negentropy 0.3.1",
+ "negentropy 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "once_cell",
+ "scrypt",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "url",
+]
+
+[[package]]
+name = "nostr"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af7c1eebe17dd785e52e1f81149c1b50fa6ec92e4ac239840934d1ffbd4f631c"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

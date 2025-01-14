@@ -22,11 +22,26 @@ pub enum SyncError {
     #[error("sync: link error: {0}")]
     LinkError(#[from] noshtastic_link::LinkError),
 
+    #[error("sync: nostr event error: {0}")]
+    NostrEventError(#[from] nostr::event::Error),
+
+    #[error("sync: nostr event id error: {0}")]
+    NostrEventIdError(#[from] nostr::event::id::Error),
+
+    #[error("sync: nostr event tag error: {0}")]
+    NostrEventTagError(#[from] nostr::event::tag::Error),
+
+    #[error("sync: nostr key error: {0}")]
+    NostrEventKeyError(#[from] nostr::key::Error),
+
     #[error("sync: nostrdb error: {0}")]
     NostrdbError(#[from] nostrdb::Error),
 
     #[error("sync: negentropy error: {0}")]
     NegentropyError(#[from] negentropy::Error),
+
+    #[error("sync: secp256k1 error: {0}")]
+    Secp256k1Error(#[from] secp256k1::Error),
 }
 
 impl SyncError {

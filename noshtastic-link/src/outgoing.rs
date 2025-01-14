@@ -76,15 +76,6 @@ impl Outgoing {
             Priority::High => &mut queues.high,
         };
         let outcome = match options.action {
-            Action::Replace => {
-                if let Some(pos) = queue.iter().position(|(id, _)| *id == msgid) {
-                    queue[pos] = (msgid, frame); // Replace the old element
-                    Action::Replace
-                } else {
-                    queue.push_back((msgid, frame)); // If no match, just enqueue
-                    Action::Queue
-                }
-            }
             Action::Drop => {
                 if !queue.iter().any(|(id, _)| *id == msgid) {
                     queue.push_back((msgid, frame)); // Enqueue only if no match
@@ -134,7 +125,7 @@ impl Outgoing {
                         {
                             let mut link = slinkref.lock().await;
 
-                            debug!("sending LinkFrame {} encoded sz: {}", msgid, buffer.len());
+                            debug!("sending LinkFrame {}, sz: {}", msgid, buffer.len());
                             let mut router = LinkPacketRouter {
                                 my_id: link.my_node_num.into(),
                             };
@@ -166,8 +157,9 @@ impl Outgoing {
                             }
                         }
 
-                        // don't send packets back-to-back
-                        sleep(Duration::from_secs(5)).await;
+                        // IMPORTANT - it's important not to overload the mesh
+                        // network.  Don't send packets back-to-back!
+                        sleep(Duration::from_secs(10)).await;
                     }
                     None => {
                         drop(queues);

@@ -41,15 +41,13 @@ pub enum Priority {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Replace, // replace any matches, use their place in the queue
-    Drop,    // drop this msg if a match is already queued
-    Queue,   // ignore matches, just queue
+    Drop,  // drop this msg if a match is already queued
+    Queue, // ignore matches, just queue
 }
 
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let description = match self {
-            Action::Replace => "Replace",
             Action::Drop => "Drop",
             Action::Queue => "Queue",
         };
@@ -101,20 +99,6 @@ impl LinkMessage {
         &self.data
     }
 }
-
-// impl From<Vec<u8>> for LinkMessage {
-//     fn from(buffer: Vec<u8>) -> Self {
-//         LinkMessage { data: buffer }
-//     }
-// }
-
-// impl From<meshtastic::protobufs::FromRadio> for LinkMessage {
-//     fn from(from_radio: meshtastic::protobufs::FromRadio) -> Self {
-//         LinkMessage {
-//             data: from_radio.encode_to_vec(),
-//         }
-//     }
-// }
 
 impl From<LinkMsg> for LinkMessage {
     fn from(msg: LinkMsg) -> Self {
