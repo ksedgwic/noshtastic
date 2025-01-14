@@ -36,7 +36,7 @@ message EncNote {
   uint64 created_at = 3;
   uint32 kind = 4;
   repeated EncTag tags = 5;
-  string content = 6;
+  EncString content = 6;
   bytes sig = 7;
 }
 
@@ -49,5 +49,6 @@ message EncString {
   oneof string_type {
     string utf8_string = 1;   // utf8 string
     bytes hex_encoded = 2;    // Hex-encoded data stored as bytes
+    bytes compressed = 3;
   }
 }
