@@ -134,7 +134,7 @@ impl Outgoing {
                         {
                             let mut link = slinkref.lock().await;
 
-                            debug!("sending LinkFrame {} encoded sz: {}", msgid, buffer.len());
+                            debug!("sending LinkFrame {}, sz: {}", msgid, buffer.len());
                             let mut router = LinkPacketRouter {
                                 my_id: link.my_node_num.into(),
                             };
@@ -166,7 +166,8 @@ impl Outgoing {
                             }
                         }
 
-                        // don't send packets back-to-back
+                        // IMPORTANT - it's important not to overload the mesh
+                        // network.  Don't send packets back-to-back!
                         sleep(Duration::from_secs(5)).await;
                     }
                     None => {

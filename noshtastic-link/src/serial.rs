@@ -224,7 +224,7 @@ impl SerialLink {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
         {
             if decoded.portnum() == PortNum::PrivateApp {
-                debug!("received LinkFrame, encoded sz: {}", decoded.payload.len());
+                debug!("received LinkFrame, sz: {}", decoded.payload.len());
                 match LinkFrame::decode(&*decoded.payload) {
                     Ok(link_frame) => Self::handle_link_frame(linkref, link_frame).await,
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),

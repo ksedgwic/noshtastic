@@ -24,7 +24,7 @@ impl NegentropyState {
         let txn = nostrdb::Transaction::new(&self.ndb)?;
         let filters = vec![Filter::new().kinds([1]).build()];
         let notes = self.ndb.query(&txn, &filters, 1024)?;
-        debug!("inserting {} notes into negentropy state", notes.len());
+        debug!("composing negentropy state with {} notes", notes.len());
         for note in notes {
             match self.ndb.get_note_by_key(&txn, note.note_key) {
                 Err(err) => error!("trouble getting note {:?}: {:?}", note.note_key, err),
