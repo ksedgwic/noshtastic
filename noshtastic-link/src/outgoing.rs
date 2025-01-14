@@ -159,7 +159,7 @@ impl Outgoing {
 
                         // IMPORTANT - it's important not to overload the mesh
                         // network.  Don't send packets back-to-back!
-                        sleep(Duration::from_secs(5)).await;
+                        sleep(Duration::from_secs(10)).await;
                     }
                     None => {
                         drop(queues);
