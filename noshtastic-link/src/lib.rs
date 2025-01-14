@@ -41,15 +41,13 @@ pub enum Priority {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Replace, // replace any matches, use their place in the queue
-    Drop,    // drop this msg if a match is already queued
-    Queue,   // ignore matches, just queue
+    Drop,  // drop this msg if a match is already queued
+    Queue, // ignore matches, just queue
 }
 
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let description = match self {
-            Action::Replace => "Replace",
             Action::Drop => "Drop",
             Action::Queue => "Queue",
         };

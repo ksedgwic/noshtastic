@@ -76,15 +76,6 @@ impl Outgoing {
             Priority::High => &mut queues.high,
         };
         let outcome = match options.action {
-            Action::Replace => {
-                if let Some(pos) = queue.iter().position(|(id, _)| *id == msgid) {
-                    queue[pos] = (msgid, frame); // Replace the old element
-                    Action::Replace
-                } else {
-                    queue.push_back((msgid, frame)); // If no match, just enqueue
-                    Action::Queue
-                }
-            }
             Action::Drop => {
                 if !queue.iter().any(|(id, _)| *id == msgid) {
                     queue.push_back((msgid, frame)); // Enqueue only if no match

@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkMissing, Action, FragmentCache, LinkError, LinkFrag, LinkFrame,
+    outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkError, LinkFrag, LinkFrame,
     LinkMessage, LinkMsg, LinkOptionsBuilder, LinkRef, LinkResult, MeshtasticLink, MsgId, Payload,
     Priority,
 };
@@ -193,10 +193,7 @@ impl SerialLink {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new()
-                        .priority(Priority::High)
-                        .action(Action::Replace)
-                        .build(),
+                    LinkOptionsBuilder::new().priority(Priority::High).build(),
                 )
                 .await;
             debug!(
@@ -303,10 +300,7 @@ impl SerialLink {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new()
-                        .priority(Priority::High)
-                        .action(Action::Replace)
-                        .build(),
+                    LinkOptionsBuilder::new().priority(Priority::High).build(),
                 )
                 .await;
             debug!(

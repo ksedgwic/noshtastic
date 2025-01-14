@@ -16,9 +16,7 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 
-use noshtastic_link::{
-    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
-};
+use noshtastic_link::{self, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority};
 
 use crate::{
     negentropy::NegentropyState, EncNote, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
@@ -330,8 +328,6 @@ impl Sync {
     // well-known message ids
     const ID_PING: u64 = 1;
     const ID_PONG: u64 = 2;
-    const ID_NEGENTROPY_INITIAL: u64 = 3;
-    const ID_NEGENTROPY_RESPONSE: u64 = 4;
 
     fn send_negentropy_message(&self, data: &[u8], is_initial: bool) -> SyncResult<()> {
         info!(
@@ -342,28 +338,18 @@ impl Sync {
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        let (msgid, priority, action) = if is_initial {
+        let priority = if is_initial {
             // defer initial messages if we are busy
-            (
-                MsgId::new(Self::ID_NEGENTROPY_INITIAL, None),
-                Priority::Low,
-                Action::Replace,
-            )
+            Priority::Low
         } else {
             // send response messages promptly
-            (
-                MsgId::new(Self::ID_NEGENTROPY_RESPONSE, None),
-                Priority::High,
-                Action::Queue,
-            )
+            Priority::High
         };
+        let msgid = MsgId::from(data);
         self.queue_outgoing_message(
             msgid,
             Some(negmsg),
-            LinkOptionsBuilder::new()
-                .priority(priority)
-                .action(action)
-                .build(),
+            LinkOptionsBuilder::new().priority(priority).build(),
         )
     }
 
