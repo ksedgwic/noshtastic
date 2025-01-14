@@ -60,7 +60,7 @@ impl Sync {
         task::spawn(async move {
             debug!("negentropy sync starting");
             sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
-            let mut interval = time::interval(Duration::from_secs(60));
+            let mut interval = time::interval(Duration::from_secs(5 * 60));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -68,7 +68,7 @@ impl Sync {
                         match sync.negentropy.initiate() {
                             Err(err) => error!("trouble in negentropy initiate: {:?}", err),
                             Ok(negbytes) =>
-                                if let Err(err) = sync.send_negentropy_message(&negbytes) {
+                                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
                                     error!("trouble queueing negentropy message: {:?}", err);
                                 },
                         }
@@ -208,7 +208,7 @@ impl Sync {
                     Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
                     Ok(None) => info!("synchronized with remote"),
                     Ok(Some(nextmsg)) => {
-                        if let Err(err) = sync.send_negentropy_message(&nextmsg) {
+                        if let Err(err) = sync.send_negentropy_message(&nextmsg, false) {
                             error!("trouble queueing next negentropy message: {:?}", err);
                         }
                     }
@@ -330,19 +330,39 @@ impl Sync {
     // well-known message ids
     const ID_PING: u64 = 1;
     const ID_PONG: u64 = 2;
-    const ID_NEGENTROPY: u64 = 3;
+    const ID_NEGENTROPY_INITIAL: u64 = 3;
+    const ID_NEGENTROPY_RESPONSE: u64 = 4;
 
-    fn send_negentropy_message(&self, data: &[u8]) -> SyncResult<()> {
-        info!("queueing NegentropyMessage sz: {}", data.len());
+    fn send_negentropy_message(&self, data: &[u8], is_initial: bool) -> SyncResult<()> {
+        info!(
+            "queueing NegentropyMessage, is_initial: {}, sz: {}",
+            is_initial,
+            data.len()
+        );
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
+        let (msgid, priority, action) = if is_initial {
+            // defer initial messages if we are busy
+            (
+                MsgId::new(Self::ID_NEGENTROPY_INITIAL, None),
+                Priority::Low,
+                Action::Replace,
+            )
+        } else {
+            // send response messages promptly
+            (
+                MsgId::new(Self::ID_NEGENTROPY_RESPONSE, None),
+                Priority::High,
+                Action::Queue,
+            )
+        };
         self.queue_outgoing_message(
-            MsgId::new(Self::ID_NEGENTROPY, None),
+            msgid,
             Some(negmsg),
             LinkOptionsBuilder::new()
-                .priority(Priority::Low)
-                .action(Action::Replace)
+                .priority(priority)
+                .action(action)
                 .build(),
         )
     }
