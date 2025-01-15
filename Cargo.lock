@@ -1661,6 +1661,7 @@ dependencies = [
  "nostr 0.38.0",
  "nostrdb",
  "prost",
+ "rand",
  "secp256k1",
  "serde_json",
  "thiserror 2.0.9",

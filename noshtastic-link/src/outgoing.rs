@@ -97,6 +97,30 @@ impl Outgoing {
         outcome
     }
 
+    pub(crate) async fn cancel(&mut self, msgid: MsgId, options: LinkOptions) {
+        // When the link receives a message it should cancel any
+        // outgoing copies of the message (another node beat us to
+        // it) ...
+
+        let mut queues = self.queuesref.lock().await;
+
+        // Determine the queue to search based on priority
+        let queue = match options.priority {
+            Priority::Low => &mut queues.low,
+            Priority::Normal => &mut queues.normal,
+            Priority::High => &mut queues.high,
+        };
+
+        // Retain only those elements that do not match the given `msgid`
+        let original_len = queue.len();
+        queue.retain(|(id, _)| *id != msgid);
+
+        let removed_count = original_len - queue.len();
+        if removed_count > 0 {
+            debug!("cancelled send of {} because already sent", msgid);
+        }
+    }
+
     pub(crate) fn start_regulator(&mut self, slinkref: SerialLinkRef) -> LinkResult<()> {
         let (notify, mut wake) = mpsc::channel::<()>(100);
         self.notify = Some(notify);

@@ -6,6 +6,7 @@
 use log::*;
 use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
+use rand::{seq::SliceRandom, thread_rng};
 use std::{
     fmt,
     sync::{Arc, Mutex},
@@ -16,7 +17,9 @@ use tokio::{
     time::{self, sleep, Duration},
 };
 
-use noshtastic_link::{self, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority};
+use noshtastic_link::{
+    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
+};
 
 use crate::{
     negentropy::NegentropyState, EncNote, LruSet, NegentropyMessage, Payload, Ping, Pong, RawNote,
@@ -302,7 +305,11 @@ impl Sync {
         Ok(())
     }
 
-    fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
+    fn send_needed_notes(&self, mut needed: Vec<Vec<u8>>) -> SyncResult<()> {
+        // Shuffle the notes do reduce duplication w/ other nodes
+        // responding to the same needs ...
+        needed.shuffle(&mut thread_rng());
+
         let txn = Transaction::new(&self.ndb)?;
         for id in needed.iter() {
             if id.len() == 32 {
@@ -358,13 +365,19 @@ impl Sync {
     //     let raw_note = Payload::RawNote(RawNote {
     //         data: note_json.as_bytes().to_vec(),
     //     });
-    //     self.queue_outgoing_message(msgid, Some(raw_note), LinkOptionsBuilder::new().build())
+    //     self.queue_outgoing_message(
+    //         msgid, Some(raw_note), LinkOptionsBuilder::new().action(Action::Drop).build()
+    //     )
     // }
 
     fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
         info!("queueing EncNote {} sz: {}", msgid, note_json.len());
         let enc_note = Payload::EncNote(EncNote::try_from(note_json)?);
-        self.queue_outgoing_message(msgid, Some(enc_note), LinkOptionsBuilder::new().build())
+        self.queue_outgoing_message(
+            msgid,
+            Some(enc_note),
+            LinkOptionsBuilder::new().action(Action::Drop).build(),
+        )
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
