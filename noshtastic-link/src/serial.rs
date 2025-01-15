@@ -193,7 +193,10 @@ impl SerialLink {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new().priority(Priority::High).build(),
+                    LinkOptionsBuilder::new()
+                        .action(crate::Action::Drop)
+                        .priority(Priority::High)
+                        .build(),
                 )
                 .await;
             debug!(
