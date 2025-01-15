@@ -6,6 +6,7 @@
 use log::*;
 use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
+use rand::{seq::SliceRandom, thread_rng};
 use std::{
     fmt,
     sync::{Arc, Mutex},
@@ -304,7 +305,11 @@ impl Sync {
         Ok(())
     }
 
-    fn send_needed_notes(&self, needed: Vec<Vec<u8>>) -> SyncResult<()> {
+    fn send_needed_notes(&self, mut needed: Vec<Vec<u8>>) -> SyncResult<()> {
+        // Shuffle the notes do reduce duplication w/ other nodes
+        // responding to the same needs ...
+        needed.shuffle(&mut thread_rng());
+
         let txn = Transaction::new(&self.ndb)?;
         for id in needed.iter() {
             if id.len() == 32 {
