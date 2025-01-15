@@ -258,7 +258,7 @@ mod tests {
         ];
 
         for (index, original_json) in test_notes.iter().enumerate() {
-            let compacted_json = compact_json(&original_json);
+            let compacted_json = compact_json(original_json);
             let note = nostr::event::Event::from_json(original_json).expect("nostr event");
             let enc_note = EncNote::try_from(note).expect("EncNote");
 

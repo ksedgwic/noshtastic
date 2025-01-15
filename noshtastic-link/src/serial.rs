@@ -265,9 +265,10 @@ impl SerialLink {
     async fn handle_fragment(linkref: &SerialLinkRef, frag: LinkFrag) {
         let msgid = MsgId::new(frag.msgid, Some(frag.fragndx));
         debug!(
-            "received LinkFrag {}/{} payload sz: {}",
+            "received LinkFrag {}/{}, rotoff: {}, payload sz: {}",
             msgid,
             frag.numfrag,
+            frag.rotoff,
             frag.data.len()
         );
         let inbound = true;
@@ -289,6 +290,7 @@ impl SerialLink {
             let fragndx = frag.fragndx;
             let numfrag = frag.numfrag;
             let fraglen = frag.data.len();
+            let rotoff = frag.rotoff;
             let link_frame = LinkFrame {
                 magic: LINK_MAGIC,
                 version: LINK_VERSION,
@@ -304,8 +306,8 @@ impl SerialLink {
                 )
                 .await;
             debug!(
-                "requeueing LinkFrag {}/{} payload sz: {} => {}",
-                msgid, numfrag, fraglen, outcome
+                "requeueing LinkFrag {}/{}, rotoff: {}, payload sz: {} => {}",
+                msgid, numfrag, rotoff, fraglen, outcome
             );
         }
     }
@@ -369,12 +371,14 @@ impl SerialLink {
     async fn send_fragments(linkref: SerialLinkRef, msg: LinkMessage) -> LinkResult<()> {
         let data = &msg.data;
         let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
+        let rotoff = 0;
         let mut link = linkref.lock().await;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
                 msgid: msg.msgid.base,
                 numfrag,
                 fragndx,
+                rotoff,
                 data: chunk.to_vec(),
             };
             let inbound = false;

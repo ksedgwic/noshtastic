@@ -24,7 +24,8 @@ message LinkFrag {
   fixed64 msgid = 1;		// Truncated nostr msgid (or hash for others)
   uint32 numfrag = 2;   	// Total number of fragments in the packet
   uint32 fragndx = 3;		// Index of this fragment (starting at 0)
-  bytes data = 4;		// Raw data buffer for this fragment
+  uint32 rotoff = 4;		// Octet rotation offset (see noshtastic:#15)
+  bytes data = 5;		// Raw data buffer for this fragment
 }
 
 // A missing fragment resend request

@@ -6,6 +6,7 @@
 use log::*;
 use negentropy::{Bytes, Id, Negentropy, NegentropyStorageVector};
 use nostrdb::{Filter, Ndb};
+use std::io::Write;
 
 use crate::SyncResult;
 
@@ -48,7 +49,9 @@ impl NegentropyState {
         debug!("initiate starting");
         let mut negentropy = self.compose_negentropy()?;
         let negmsg = negentropy.initiate()?;
+        Self::writeln_stdio("------------------- INITIATING QUERY -------------------");
         negentropy.dump_query(&negmsg, std::io::stdout())?;
+        Self::writeln_stdio("--------------------------------------------------------");
         Ok(negmsg.to_bytes())
     }
 
@@ -60,7 +63,9 @@ impl NegentropyState {
     ) -> SyncResult<Option<Vec<u8>>> {
         debug!("reconcile starting");
         let mut negentropy = self.compose_negentropy()?;
+        Self::writeln_stdio("----------------- RECEIVED THEIR QUERY -----------------");
         negentropy.dump_query(&Bytes::from_slice(inmsg), std::io::stdout())?;
+        Self::writeln_stdio("--------------------------------------------------------");
         negentropy.set_initiator();
         let mut have_ids_tmp: Vec<negentropy::Id> = Vec::new();
         let mut need_ids_tmp: Vec<negentropy::Id> = Vec::new();
@@ -78,8 +83,14 @@ impl NegentropyState {
             .map(|id| id.to_bytes().to_vec())
             .collect();
         if let Some(negmsg) = &maybe_negmsg {
+            Self::writeln_stdio("----------------- SENDING OUR RESPONSE -----------------");
             negentropy.dump_query(negmsg, std::io::stdout())?;
+            Self::writeln_stdio("--------------------------------------------------------");
         }
         Ok(maybe_negmsg.map(|bytes| bytes.to_vec()))
+    }
+
+    fn writeln_stdio(line: &str) {
+        writeln!(std::io::stdout(), "{}", line).ok();
     }
 }
