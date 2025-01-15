@@ -253,12 +253,31 @@ impl SerialLink {
 
     // Handle unfragmented messages
     async fn handle_complete(linkref: &SerialLinkRef, linkmsg: LinkMsg) {
+        let msgid = MsgId::new(linkmsg.msgid, None);
         debug!(
             "received complete LinkMsg {} w/ payload sz: {}",
-            MsgId::new(linkmsg.msgid, None),
+            msgid,
             linkmsg.data.len()
         );
-        let link = linkref.lock().await;
+
+        let mut link = linkref.lock().await;
+
+        // cancel any outgoing sends of this message that are in our
+        // queues (another node beat us to it ...)
+        link.outgoing
+            .cancel(
+                msgid,
+                LinkOptionsBuilder::new().priority(Priority::High).build(),
+            )
+            .await;
+        link.outgoing
+            .cancel(
+                msgid,
+                LinkOptionsBuilder::new().priority(Priority::Normal).build(),
+            )
+            .await;
+
+        // send the message to the client
         if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
             error!("failed to send message: {}", err);
         }
@@ -274,8 +293,26 @@ impl SerialLink {
             frag.rotoff,
             frag.data.len()
         );
+
         let inbound = true;
         let mut link = linkref.lock().await;
+
+        // cancel any outgoing sends of this fragment that are in our
+        // queues (another node beat us to it ...)
+        link.outgoing
+            .cancel(
+                msgid,
+                LinkOptionsBuilder::new().priority(Priority::High).build(),
+            )
+            .await;
+        link.outgoing
+            .cancel(
+                msgid,
+                LinkOptionsBuilder::new().priority(Priority::Normal).build(),
+            )
+            .await;
+
+        // add the fragment and if completed send the message to the client
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
             debug!("completed LinkFrag {}", msgid);
             if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
