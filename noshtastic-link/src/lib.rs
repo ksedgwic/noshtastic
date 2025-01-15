@@ -133,7 +133,6 @@ pub struct MsgId {
     pub base: u64,
     pub frag: Option<u32>,
 }
-// pub struct MsgId(pub u64);
 
 impl MsgId {
     pub fn new(base: u64, frag: Option<u32>) -> Self {
