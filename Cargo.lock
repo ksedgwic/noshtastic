@@ -1654,6 +1654,7 @@ name = "noshtastic-sync"
 version = "0.1.0"
 dependencies = [
  "brotli",
+ "futures",
  "hex",
  "log",
  "negentropy 0.4.3 (git+https://github.com/ksedgwic/rust-negentropy.git?rev=ec19dbb4947fa7b0fbf900405a92bde504598ed1)",

@@ -3,6 +3,7 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
+use futures::StreamExt;
 use log::*;
 use nostrdb::{Filter, Ndb, NoteKey, Transaction};
 use prost::Message;
@@ -87,21 +88,17 @@ impl Sync {
 
     fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
         let sync = syncref.lock().unwrap();
-        let filter = Filter::new()
-            .kinds([1])
-            .limit(sync.max_notes as u64)
-            .build();
-        let ndbsubid = sync.ndb.subscribe(&[filter.clone()])?;
-
         let syncref_clone = syncref.clone();
-        let ndb_clone = sync.ndb.clone();
         let max_notes = sync.max_notes;
+        let filter = Filter::new().kinds([1]).limit(max_notes as u64).build();
+        let ndbsubid = sync.ndb.subscribe(&[filter.clone()]).unwrap();
+        let mut sub = ndbsubid.stream(&sync.ndb).notes_per_await(1);
         task::spawn(async move {
             debug!("local subscription starting");
             loop {
                 debug!("waiting on local subscription");
-                match ndb_clone.wait_for_notes(ndbsubid, max_notes).await {
-                    Ok(notekeys) => {
+                match sub.next().await {
+                    Some(notekeys) => {
                         info!("saw notekeys: {:?}", notekeys);
                         // TEMPORARY - for now don't immediately send new notes
                         if false {
@@ -114,9 +111,9 @@ impl Sync {
                             }
                         }
                     }
-                    Err(err) => {
-                        error!("Error waiting for notes: {:?}", err);
-                        // keep going for now
+                    None => {
+                        // we're done
+                        break;
                     }
                 }
             }

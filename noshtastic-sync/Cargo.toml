@@ -20,6 +20,7 @@ tonic = { workspace = true }
 
 # unique dependencies
 brotli = "7.0"
+futures = "0.3"
 negentropy = { git = "https://github.com/ksedgwic/rust-negentropy.git", rev = "ec19dbb4947fa7b0fbf900405a92bde504598ed1", features = ["tiny-frame"] }
 nostr = "0.38"
 rand = "0.8"
