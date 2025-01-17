@@ -717,7 +717,7 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 [[package]]
 name = "enostr"
 version = "0.1.0"
-source = "git+https://github.com/ksedgwic/notedeck.git?rev=ff5ac24ec93c3c6062e8e3c695c07b2def7ee6cb#ff5ac24ec93c3c6062e8e3c695c07b2def7ee6cb"
+source = "git+https://github.com/ksedgwic/notedeck.git?rev=5adbd88fd82c171404d5c45ddc9448cdf9a815aa#5adbd88fd82c171404d5c45ddc9448cdf9a815aa"
 dependencies = [
  "bech32",
  "ewebsock",
@@ -1654,6 +1654,7 @@ name = "noshtastic-sync"
 version = "0.1.0"
 dependencies = [
  "brotli",
+ "futures",
  "hex",
  "log",
  "negentropy 0.4.3 (git+https://github.com/ksedgwic/rust-negentropy.git?rev=ec19dbb4947fa7b0fbf900405a92bde504598ed1)",
@@ -1740,7 +1741,7 @@ dependencies = [
 [[package]]
 name = "nostrdb"
 version = "0.5.1"
-source = "git+https://github.com/damus-io/nostrdb-rs?rev=2111948b078b24a1659d0bd5d8570f370269c99b#2111948b078b24a1659d0bd5d8570f370269c99b"
+source = "git+https://github.com/damus-io/nostrdb-rs?rev=df03575b0a0133d8700e90d538c01d253f4a480a#df03575b0a0133d8700e90d538c01d253f4a480a"
 dependencies = [
  "bindgen",
  "cc",
