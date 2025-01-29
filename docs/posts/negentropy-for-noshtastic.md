@@ -34,7 +34,7 @@ Traditional negentropy operates with a **clear client-server distinction**, wher
 
 This model **doesn’t fit Noshtastic**, where nodes **broadcast** rather than communicate in strict pairs. I made several key changes:  
 - Nodes **don’t run to completion** but instead **sync incrementally** and over time achieve full content synchronization.  
-- Instead of accumulating "have" and "need" lists, Noshtastic nodes **immediately broadcast** any "have" content (notes that are needed by others) as soon as it is recognized.  
+- Instead of accumulating "have" and "need" lists, Noshtastic nodes **immediately broadcast** any "have" content (notes that are needed by others) as soon as they are recognized.  
 - Nodes **respond to negentropy packets from any/all nodes in range**, leading to a **parallel concurrent overlapping negentropy session**.  
 - All nodes assert `set_initiator`, making them effectively **clients** in every exchange.  
 
