@@ -1,10 +1,11 @@
-# Noshtastic Demo Procedure
+# First Noshtastic Demo Setup
+
+The first demo uses multiple meshtastic radios connected to a computer
+running a desktop (CLI) version of Noshtastic. Multiple
+radios can be connected to a single computer.
 
 The following procedure presumes you are a rust developer and familiar
 with Meshtastic radios.
-
-This demo uses USB-serial connected Meshtastic radios.  Multiple
-radios can be connected to a single computer.
 
 ## Build noshtastic
 
@@ -43,7 +44,7 @@ cargo run -- -d dir0 -s /dev/ttyACM0
 ```
 
 Wait 10 seconds until the node starts and has sent it's initial
-negentropy request (which will fall on empty ears ...)
+negentropy request (which will fall on deaf ears ...)
 
 Start the second node:
 ```
@@ -62,3 +63,5 @@ Node activity will be logged to each of the controlling terminals.
 **Please be considerate of your local Meshtastic network, don't leave nodes running
 when you don't need them and please don't sync a large number of nostr
 notes!**
+
+[← Back to Blog Index](../index.html)
