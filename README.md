@@ -81,6 +81,8 @@ Noshtastic relays are configured to synchronize messages for specific
 regions.  For example a noshtastic relay might cover **`9q[bc89]`**
 (the region including `9qb`, `9qc`, `9q8`, and `9q9`).
 
-![Bay Area Geohash](doc/bayarea-geohash.png)
+![Bay Area Geohash](docs/bayarea-geohash.png)
 
 *Image source: [Geohash Explorer by Chris Hewett](https://chrishewett.com/blog/geohash-explorer/)*
+
+## Check out the [Noshtastic Blog](https://ksedgwic.github.io/noshtastic/)
