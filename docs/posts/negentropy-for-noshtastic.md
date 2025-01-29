@@ -25,9 +25,7 @@ The **rust-nostr/negentropy** implementation **requires 4KB frames**. I modified
 
 These modifications were implemented in a **fork** of `rust-nostr/negentropy`, controlled by a `tiny-frame` feature flag.
 
----
-
-## **3. Rethinking the Client-Server Model**  
+### **Rethinking the Client-Server Model**  
 Traditional negentropy operates with a **clear client-server distinction**, where:  
 - The **client initiates** the protocol.  
 - The process **runs until synchronization is complete** (i.e., all "have" and "want" lists are resolved).  
@@ -42,7 +40,7 @@ These changes allow negentropy to function in a **fully decentralized, broadcast
 
 ---
 
-## **4. Key Takeaways & Next Steps**  
+## **3. Key Takeaways & Next Steps**  
 While I initially expected negentropy to require heavy modifications, it has proven to be **remarkably adaptable** to Noshtastic’s needs.  
 
 ### ✅ **What Works Well**  
