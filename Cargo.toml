@@ -2,7 +2,7 @@
 resolver = "2"
 package.version = "0.1.0"
 members = [
-    "crates/noshtastic-app",
+    "crates/noshtastic-cli",
     "crates/noshtastic-link",
     "crates/noshtastic-sync",
     "crates/noshtastic-testgw",

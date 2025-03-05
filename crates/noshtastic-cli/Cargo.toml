@@ -1,6 +1,6 @@
 [package]
-name = "noshtastic-app"
-description = "A program for syncing nostr messages over a meshtastic network."
+name = "noshtastic-cli"
+description = "A command line program for syncing nostr messages over a meshtastic network."
 version = { workspace = true }
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
