@@ -27,3 +27,6 @@ rev = "1e372172ea0579622a56a36d0c0cec3a17d2fbf6"
 
 [build-dependencies]
 tonic-build = "0.8"
+
+[lib]
+crate-type = ["lib", "cdylib"]

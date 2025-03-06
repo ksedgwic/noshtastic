@@ -6,6 +6,7 @@ members = [
     "crates/noshtastic-link",
     "crates/noshtastic-sync",
     "crates/noshtastic-testgw",
+    "crates/noshtastic-android",
 ]
 
 [workspace.dependencies]
