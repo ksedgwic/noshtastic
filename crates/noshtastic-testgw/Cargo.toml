@@ -1,7 +1,7 @@
 [package]
 name = "noshtastic-testgw"
 description = "Ingests test packets from a standard nostr relay."
-version = "0.1.0"
+version = { workspace = true }
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
 
@@ -22,3 +22,6 @@ uuid = { version = "1.11", features = ["v4"] }
 env_logger = { workspace = true }
 hex = { workspace = true }
 once_cell = "1.20"
+
+[lib]
+crate-type = ["lib", "cdylib"]

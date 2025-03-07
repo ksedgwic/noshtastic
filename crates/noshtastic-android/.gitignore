@@ -1,0 +1,8 @@
+build.log
+rusty-tags.vi
+android/app/build
+*.so
+*.swp
+*.jar
+.gradle
+/packages

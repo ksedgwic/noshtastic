@@ -1,17 +1,19 @@
 [workspace]
 resolver = "2"
+package.version = "0.1.0"
 members = [
-    "noshtastic-app",
-    "noshtastic-link",
-    "noshtastic-sync",
-    "noshtastic-testgw",
+    "crates/noshtastic-cli",
+    "crates/noshtastic-link",
+    "crates/noshtastic-sync",
+    "crates/noshtastic-testgw",
+    "crates/noshtastic-android",
 ]
 
 [workspace.dependencies]
 # local dependencies
-noshtastic-link = { path = "./noshtastic-link" }
-noshtastic-sync = { path = "./noshtastic-sync" }
-noshtastic-testgw = { path = "./noshtastic-testgw" }
+noshtastic-link = { path = "./crates/noshtastic-link" }
+noshtastic-sync = { path = "./crates/noshtastic-sync" }
+noshtastic-testgw = { path = "./crates/noshtastic-testgw" }
 
 # common dependencies
 anyhow = "1.0"

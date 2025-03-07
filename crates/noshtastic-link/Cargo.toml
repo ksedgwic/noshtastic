@@ -1,7 +1,7 @@
 [package]
 name = "noshtastic-link"
 description = "A library which facilitates sending noshtastic messages to meshtastic radios."
-version = "0.1.0"
+version = { workspace = true }
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
 
@@ -27,3 +27,6 @@ rev = "1e372172ea0579622a56a36d0c0cec3a17d2fbf6"
 
 [build-dependencies]
 tonic-build = "0.8"
+
+[lib]
+crate-type = ["lib", "cdylib"]
