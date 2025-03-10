@@ -7,6 +7,8 @@ edition = "2021"
 
 [dependencies]
 # common dependencies
+chrono = { workspace = true }
+env_logger = { workspace = true }
 tokio = { workspace = true }
 
 # unique dependencies
@@ -16,10 +18,8 @@ egui-winit = { version = "0.30", features = ["android-game-activity"] }
 egui_extras = { version = "0.30", features = ["all_loaders"] }
 ehttp = "0.5.0"
 ewebsock = { version = "0.8", features = ["tls"] }
-tracing = { version = "0.1", features = ["log"] }
-tracing-appender = "0.2"
-tracing-logcat = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
+once_cell = "1.21"
 
 [lib]
 crate-type = ["cdylib"]
