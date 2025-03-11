@@ -118,8 +118,11 @@ fn init_nostrdb(data_dir: &str) -> Result<Ndb> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let stop_signal = Arc::new(Notify::new());
     init_logger();
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .unwrap();
+    let stop_signal = Arc::new(Notify::new());
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
     let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
