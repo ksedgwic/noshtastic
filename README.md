@@ -86,3 +86,10 @@ regions.  For example a noshtastic relay might cover **`9q[bc89]`**
 *Image source: [Geohash Explorer by Chris Hewett](https://chrishewett.com/blog/geohash-explorer/)*
 
 ## Check out the [Noshtastic Blog](https://ksedgwic.github.io/noshtastic/)
+
+## Install on Android
+
+Connect an android phone via USB to the build computer and type:
+```
+make android
+```
