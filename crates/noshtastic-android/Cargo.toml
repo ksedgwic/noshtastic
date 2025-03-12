@@ -23,3 +23,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lib]
 crate-type = ["cdylib"]
+
+[build]
+target = "aarch64-linux-android"
