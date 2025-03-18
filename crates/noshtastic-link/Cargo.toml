@@ -8,20 +8,23 @@ edition = "2021"
 [dependencies]
 # common dependencies
 async-trait = { workspace = true }
-hex = { workspace = true }
 log = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
 
 # unique dependencies
 sha2 = "0.10"
 tokio-serial = "5.4"
-meshtastic = "0.1"
+
+# need BLE, use custom branch w/ prospective PRs and fix
+meshtastic = { git = "https://github.com/ksedgwic/meshtastic-rust", branch = "ble-devel", features = ["bluetooth-le"] }
 
 [build-dependencies]
 tonic-build = "0.8"
+
+[dev-dependencies]
+hex = { workspace = true }
 
 [lib]
 crate-type = ["lib", "cdylib"]

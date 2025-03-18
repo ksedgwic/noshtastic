@@ -17,7 +17,6 @@ pub use error::*;
 pub struct TestGW {
     ndb: Ndb,
     opt_relay_url: Option<String>,
-    #[allow(dead_code)] // FIXME - remove this
     opt_filter_json: Option<String>,
     poolref: Arc<Mutex<RelayPool>>,
 }

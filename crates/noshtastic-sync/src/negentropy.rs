@@ -10,7 +10,6 @@ use std::io::Write;
 
 use crate::SyncResult;
 
-#[allow(dead_code)] // FIXME - remove this asap
 pub(crate) struct NegentropyState {
     ndb: Ndb,
 }

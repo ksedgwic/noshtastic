@@ -12,11 +12,10 @@ edition = "2021"
 log = { workspace = true }
 nostrdb = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 
 # unique dependencies
 enostr = { git = "https://github.com/ksedgwic/notedeck.git", rev = "5adbd88fd82c171404d5c45ddc9448cdf9a815aa" }
-uuid = { version = "1.11", features = ["v4"] }
+uuid = { version = "1.15", features = ["v4"] }
 
 [dev-dependencies]
 env_logger = { workspace = true }
