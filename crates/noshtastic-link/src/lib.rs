@@ -120,6 +120,16 @@ impl From<LinkMsg> for LinkMessage {
     }
 }
 
+pub async fn scan_for_radios() -> LinkResult<Vec<String>> {
+    if cfg!(target_os = "android") {
+        ble_driver::scan_for_ble_radios().await
+    } else {
+        Err(LinkError::invalid_argument(
+            "scan only implemented for android",
+        ))
+    }
+}
+
 pub async fn create_link(
     maybe_hint: &Option<String>,
     stop_signal: Arc<Notify>,
