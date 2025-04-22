@@ -6,11 +6,10 @@
 use log::*;
 use negentropy::{Bytes, Id, Negentropy, NegentropyStorageVector};
 use nostrdb::{Filter, Ndb};
-use std::io::Write;
+use std::io::{Result as IoResult, Write};
 
 use crate::SyncResult;
 
-#[allow(dead_code)] // FIXME - remove this asap
 pub(crate) struct NegentropyState {
     ndb: Ndb,
 }
@@ -50,8 +49,9 @@ impl NegentropyState {
         let mut negentropy = self.compose_negentropy()?;
         let negmsg = negentropy.initiate()?;
         Self::writeln_stdio("------------------- INITIATING QUERY -------------------");
-        negentropy.dump_query(&negmsg, std::io::stdout())?;
+        negentropy.dump_query(&negmsg, LogLineWriter)?;
         Self::writeln_stdio("--------------------------------------------------------");
+        debug!("initiate returning");
         Ok(negmsg.to_bytes())
     }
 
@@ -64,7 +64,7 @@ impl NegentropyState {
         debug!("reconcile starting");
         let mut negentropy = self.compose_negentropy()?;
         Self::writeln_stdio("----------------- RECEIVED THEIR QUERY -----------------");
-        negentropy.dump_query(&Bytes::from_slice(inmsg), std::io::stdout())?;
+        negentropy.dump_query(&Bytes::from_slice(inmsg), LogLineWriter)?;
         Self::writeln_stdio("--------------------------------------------------------");
         negentropy.set_initiator();
         let mut have_ids_tmp: Vec<negentropy::Id> = Vec::new();
@@ -84,13 +84,45 @@ impl NegentropyState {
             .collect();
         if let Some(negmsg) = &maybe_negmsg {
             Self::writeln_stdio("----------------- SENDING OUR RESPONSE -----------------");
-            negentropy.dump_query(negmsg, std::io::stdout())?;
+            negentropy.dump_query(negmsg, LogLineWriter)?;
             Self::writeln_stdio("--------------------------------------------------------");
         }
         Ok(maybe_negmsg.map(|bytes| bytes.to_vec()))
     }
 
+    // really writes it to the log
     fn writeln_stdio(line: &str) {
-        writeln!(std::io::stdout(), "{}", line).ok();
+        writeln!(LogLineWriter, "{}", line).ok();
+    }
+}
+
+pub struct LogLineWriter;
+
+impl Write for LogLineWriter {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        // We'll interpret the incoming bytes as UTF-8,
+        // then split by newlines so we can log line-by-line.
+        let text = match std::str::from_utf8(buf) {
+            Ok(s) => s,
+            Err(_) => {
+                // If there's non-UTF8 data, handle or skip
+                return Ok(buf.len());
+            }
+        };
+
+        // log each line separately
+        for line in text.split('\n') {
+            if !line.is_empty() {
+                log::info!("{}", line);
+            }
+        }
+
+        // We say we "used" all bytes. The library won't try rewriting them.
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        // No-op
+        Ok(())
     }
 }

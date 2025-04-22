@@ -17,9 +17,7 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{
-    serial::SerialLinkRef, Action, LinkError, LinkFrame, LinkOptions, LinkResult, MsgId, Priority,
-};
+use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
 #[derive(Debug)]
 struct Queues {
@@ -121,7 +119,7 @@ impl Outgoing {
         }
     }
 
-    pub(crate) fn start_regulator(&mut self, slinkref: SerialLinkRef) -> LinkResult<()> {
+    pub(crate) fn start_regulator(&mut self, linkref: LinkRef) -> LinkResult<()> {
         let (notify, mut wake) = mpsc::channel::<()>(100);
         self.notify = Some(notify);
         let queueref = self.queuesref.clone();
@@ -147,7 +145,7 @@ impl Outgoing {
 
                         // scope the link lock
                         {
-                            let mut link = slinkref.lock().await;
+                            let mut link = linkref.lock().await;
 
                             debug!("sending LinkFrame {}, sz: {}", msgid, buffer.len());
                             let mut router = LinkPacketRouter {

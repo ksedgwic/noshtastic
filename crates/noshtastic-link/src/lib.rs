@@ -3,13 +3,14 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-use async_trait::async_trait;
+use log::*;
+use meshtastic::utils;
 use sha2::{Digest, Sha256};
 use std::convert::From;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 pub mod error;
 pub use error::*;
@@ -19,12 +20,21 @@ mod proto {
 }
 mod fragcache;
 mod outgoing;
-mod serial;
+
+// Android uses Bluetooth Low-Energy (BLE) to connect to the radio
+// #[cfg(target_os = "android")]
+mod ble_driver;
+
+// CLI (unix) uses wired USB serial to connect to the radio
+// #[cfg(not(target_os = "android"))]
+mod usbserial_driver;
+
+mod link;
+
+pub use link::{Link, LinkRef};
 
 pub(crate) use fragcache::FragmentCache;
 pub(crate) use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
-
-pub type LinkRef = Arc<tokio::sync::Mutex<dyn MeshtasticLink>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkOptions {
@@ -110,21 +120,50 @@ impl From<LinkMsg> for LinkMessage {
     }
 }
 
-#[async_trait]
-pub trait MeshtasticLink: Send + Sync + Debug {
-    // no longer needed, but lazy deleting in case we need again ...
-}
-
 pub async fn create_link(
-    maybe_serial: &Option<String>,
+    maybe_hint: &Option<String>,
     stop_signal: Arc<Notify>,
 ) -> LinkResult<(
     LinkRef,
     mpsc::Sender<LinkMessage>,
     mpsc::Receiver<LinkMessage>,
 )> {
-    // In the future we may have radio interfaces other than serial ...
-    serial::SerialLink::create_serial_link(maybe_serial, stop_signal).await
+    debug!("create_link starting");
+
+    // create a stream to the radio
+    let (mesh_in_rx, connected_stream_api) = if cfg!(target_os = "android") {
+        ble_driver::create_ble_stream(maybe_hint).await
+    } else {
+        usbserial_driver::create_usbserial_stream(maybe_hint).await
+    }?;
+
+    let config_id = utils::generate_rand_id();
+    let configured_stream_api = connected_stream_api.configure(config_id).await?;
+    debug!("stream_api configured");
+
+    // create some channels
+    // +-----------+               +------------+              +------------+
+    // |           |   client_in   |            |              |            |
+    // |  Sync  tx | ------------> | rx  Link   |              |   Radio    |
+    // |           |   client_out  |            |    mesh_in   |            |
+    // |        rx | <------------ | tx      rx | <----------- | tx         |
+    // +-----------+               +------------+              +------------+
+
+    let (client_in_tx, client_in_rx) = mpsc::channel::<LinkMessage>(100);
+    let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
+
+    // create the link
+    let linkref = Arc::new(Mutex::new(Link::new(
+        configured_stream_api,
+        client_out_tx,
+        stop_signal.clone(),
+    )));
+
+    // start assoiated tasks
+    Link::start(&linkref, mesh_in_rx, client_in_rx, stop_signal.clone()).await?;
+
+    debug!("create_link finished");
+    Ok((linkref, client_in_tx, client_out_rx))
 }
 
 /// The nostr msgid for notes or a content hash for other messages

@@ -16,7 +16,6 @@ nostrdb = { workspace = true }
 prost = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
 
 # unique dependencies
 brotli = "7.0"
