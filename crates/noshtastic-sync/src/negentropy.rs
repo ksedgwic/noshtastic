@@ -6,7 +6,7 @@
 use log::*;
 use negentropy::{Bytes, Id, Negentropy, NegentropyStorageVector};
 use nostrdb::{Filter, Ndb};
-use std::io::{Result as IoResult, Write};
+use std::io::Write;
 
 use crate::SyncResult;
 
@@ -49,7 +49,7 @@ impl NegentropyState {
         let mut negentropy = self.compose_negentropy()?;
         let negmsg = negentropy.initiate()?;
         Self::writeln_stdio("------------------- INITIATING QUERY -------------------");
-        negentropy.dump_query(&negmsg, LogLineWriter)?;
+        negentropy.dump_query(&negmsg, LogLineWriter::new())?;
         Self::writeln_stdio("--------------------------------------------------------");
         debug!("initiate returning");
         Ok(negmsg.to_bytes())
@@ -64,7 +64,7 @@ impl NegentropyState {
         debug!("reconcile starting");
         let mut negentropy = self.compose_negentropy()?;
         Self::writeln_stdio("----------------- RECEIVED THEIR QUERY -----------------");
-        negentropy.dump_query(&Bytes::from_slice(inmsg), LogLineWriter)?;
+        negentropy.dump_query(&Bytes::from_slice(inmsg), LogLineWriter::new())?;
         Self::writeln_stdio("--------------------------------------------------------");
         negentropy.set_initiator();
         let mut have_ids_tmp: Vec<negentropy::Id> = Vec::new();
@@ -84,7 +84,7 @@ impl NegentropyState {
             .collect();
         if let Some(negmsg) = &maybe_negmsg {
             Self::writeln_stdio("----------------- SENDING OUR RESPONSE -----------------");
-            negentropy.dump_query(negmsg, LogLineWriter)?;
+            negentropy.dump_query(negmsg, LogLineWriter::new())?;
             Self::writeln_stdio("--------------------------------------------------------");
         }
         Ok(maybe_negmsg.map(|bytes| bytes.to_vec()))
@@ -92,37 +92,58 @@ impl NegentropyState {
 
     // really writes it to the log
     fn writeln_stdio(line: &str) {
-        writeln!(LogLineWriter, "{}", line).ok();
+        writeln!(LogLineWriter::new(), "{}", line).ok();
     }
 }
 
-pub struct LogLineWriter;
+pub struct LogLineWriter {
+    partial_line: String,
+}
 
-impl Write for LogLineWriter {
-    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-        // We'll interpret the incoming bytes as UTF-8,
-        // then split by newlines so we can log line-by-line.
+impl LogLineWriter {
+    pub fn new() -> Self {
+        Self {
+            partial_line: String::new(),
+        }
+    }
+}
+
+impl std::io::Write for LogLineWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let text = match std::str::from_utf8(buf) {
             Ok(s) => s,
             Err(_) => {
-                // If there's non-UTF8 data, handle or skip
+                // If bytes are not valid UTF-8, just discard them or handle as needed.
                 return Ok(buf.len());
             }
         };
 
-        // log each line separately
-        for line in text.split('\n') {
-            if !line.is_empty() {
-                log::info!("{}", line);
+        // Append to our partial buffer
+        self.partial_line.push_str(text);
+
+        // Look for newlines in the partial_line
+        while let Some(pos) = self.partial_line.find('\n') {
+            // Extract everything before the newline
+            let mut line = self.partial_line.drain(..=pos).collect::<String>();
+            // Now line ends with the newline, so remove trailing '\n'
+            if let Some(stripped) = line.strip_suffix('\n') {
+                line = stripped.to_string();
+            }
+            // Skip lines that are purely whitespace
+            if !line.trim().is_empty() {
+                log::info!("{}", line.trim());
             }
         }
 
-        // We say we "used" all bytes. The library won't try rewriting them.
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> IoResult<()> {
-        // No-op
+    fn flush(&mut self) -> std::io::Result<()> {
+        // If there's any leftover text that never got a newline, we can do:
+        if !self.partial_line.trim().is_empty() {
+            log::info!("{}", self.partial_line.trim());
+            self.partial_line.clear();
+        }
         Ok(())
     }
 }
