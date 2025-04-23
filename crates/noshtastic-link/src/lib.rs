@@ -6,10 +6,7 @@
 use log::*;
 use meshtastic::utils;
 use sha2::{Digest, Sha256};
-use std::convert::From;
-use std::fmt;
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{convert::From, fmt, fmt::Debug, sync::Arc};
 use tokio::sync::{mpsc, Mutex, Notify};
 
 pub mod error;

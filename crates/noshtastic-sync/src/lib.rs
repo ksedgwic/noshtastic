@@ -14,9 +14,8 @@ pub mod proto {
 
 pub use error::*;
 pub use lruset::LruSet;
-pub use proto::sync_message::Payload;
-pub use proto::SyncMessage;
 pub use proto::{
-    enc_string::StringType, EncNote, EncString, EncTag, NegentropyMessage, Ping, Pong, RawNote,
+    enc_string::StringType, sync_message::Payload, EncNote, EncString, EncTag, NegentropyMessage,
+    Ping, Pong, RawNote, SyncMessage,
 };
 pub use sync::Sync;

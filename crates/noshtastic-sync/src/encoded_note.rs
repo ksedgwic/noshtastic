@@ -6,9 +6,7 @@
 use brotli::{CompressorWriter, DecompressorWriter};
 use nostr::{self, JsonUtil};
 use secp256k1;
-use std::convert::TryFrom;
-use std::fmt;
-use std::io::Write;
+use std::{convert::TryFrom, fmt, io::Write};
 
 use crate::{EncNote, EncString, EncTag, StringType, SyncError};
 

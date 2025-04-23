@@ -3,29 +3,26 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-// FIXME - compact
-use android_logger::Config as AndroidLogConfig;
-use android_logger::Filter;
-use android_logger::FilterBuilder;
+use android_logger::{Config as AndroidLogConfig, Filter, FilterBuilder};
 use anyhow::{Context, Result};
 use btleplug;
 use chrono::Local;
-use jni::objects::GlobalRef;
-use jni::objects::{JClass, JObject, JString, JValue};
-use jni::sys::jint;
-use jni::sys::jobjectArray;
-use jni::JNIEnv;
-use jni::JavaVM;
+use jni::{
+    objects::{GlobalRef, JClass, JObject, JString, JValue},
+    sys::{jint, jobjectArray},
+    JNIEnv, JavaVM,
+};
 use log::*;
 use nostrdb::{Config, Ndb};
 use once_cell::sync::{Lazy, OnceCell};
-use std::os::raw::c_void;
-use std::sync::{Arc, Mutex};
+use std::{
+    os::raw::c_void,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::Notify;
 
 use noshtastic_link::{self, LinkRef};
-use noshtastic_sync::sync::SyncRef;
-use noshtastic_sync::Sync;
+use noshtastic_sync::{sync::SyncRef, Sync};
 
 // Our global tokio runtime handle
 static GLOBAL_RT: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
