@@ -24,7 +24,7 @@ use crate::{
 
 const LINK_VERSION: u32 = 1;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
-const LINK_FRAG_THRESH: usize = 64;
+const LINK_FRAG_THRESH: usize = 200;
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
