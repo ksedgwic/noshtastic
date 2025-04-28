@@ -17,8 +17,9 @@ tokio = { workspace = true }
 sha2 = "0.10"
 tokio-serial = "5.4"
 
-# need BLE, use custom branch w/ prospective PRs and fix
-meshtastic = { git = "https://github.com/ksedgwic/meshtastic-rust", branch = "ble-devel", features = ["bluetooth-le"] }
+# need BLE, use custom branch w/ prospective PRs
+meshtastic =  { git = "https://github.com/ksedgwic/meshtastic-rust", rev = "e0bbeac310abb0d26f3fcc7e00c6bf66173e4215", features = ["bluetooth-le"] }
+#meshtastic = { path = "../../../meshtastic-rust", features = ["bluetooth-le"] }
 
 [build-dependencies]
 tonic-build = "0.8"

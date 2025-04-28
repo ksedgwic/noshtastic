@@ -6,10 +6,7 @@
 use log::*;
 use meshtastic::utils;
 use sha2::{Digest, Sha256};
-use std::convert::From;
-use std::fmt;
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{convert::From, fmt, fmt::Debug, sync::Arc};
 use tokio::sync::{mpsc, Mutex, Notify};
 
 pub mod error;
@@ -120,6 +117,16 @@ impl From<LinkMsg> for LinkMessage {
     }
 }
 
+pub async fn scan_for_radios() -> LinkResult<Vec<String>> {
+    if cfg!(target_os = "android") {
+        ble_driver::scan_for_ble_radios().await
+    } else {
+        Err(LinkError::invalid_argument(
+            "scan only implemented for android",
+        ))
+    }
+}
+
 pub async fn create_link(
     maybe_hint: &Option<String>,
     stop_signal: Arc<Notify>,
@@ -131,15 +138,17 @@ pub async fn create_link(
     debug!("create_link starting");
 
     // create a stream to the radio
-    let (mesh_in_rx, connected_stream_api) = if cfg!(target_os = "android") {
+    let (mut mesh_in_rx, connected_stream_api) = if cfg!(target_os = "android") {
         ble_driver::create_ble_stream(maybe_hint).await
     } else {
         usbserial_driver::create_usbserial_stream(maybe_hint).await
     }?;
 
+    debug!("stream_api configure starting");
     let config_id = utils::generate_rand_id();
     let configured_stream_api = connected_stream_api.configure(config_id).await?;
-    debug!("stream_api configured");
+    wait_for_config_complete(&mut mesh_in_rx, config_id).await?;
+    debug!("stream_api configure finished");
 
     // create some channels
     // +-----------+               +------------+              +------------+
@@ -164,6 +173,63 @@ pub async fn create_link(
 
     debug!("create_link finished");
     Ok((linkref, client_in_tx, client_out_rx))
+}
+
+use meshtastic::protobufs;
+use meshtastic::protobufs::from_radio::PayloadVariant;
+
+pub async fn wait_for_config_complete(
+    decoded_listener: &mut mpsc::UnboundedReceiver<protobufs::FromRadio>,
+    config_id: u32,
+) -> LinkResult<()> {
+    while let Some(packet) = decoded_listener.recv().await {
+        // Check the payload_variant field
+        if let Some(payload) = packet.payload_variant {
+            match payload {
+                PayloadVariant::ConfigCompleteId(id) => {
+                    if id == config_id {
+                        log::debug!("Received ConfigComplete for ID {id}, config is finished");
+                        return Ok(());
+                    } else {
+                        log::info!("Got ConfigCompleteId for {id}, but expecting {config_id}");
+                    }
+                }
+                PayloadVariant::MyInfo(myinfo) => {
+                    log::info!("Saw MyNodeInfo => device ID: {}", myinfo.my_node_num,);
+                }
+                PayloadVariant::NodeInfo(nodeinfo) => {
+                    log::info!(
+                        "Saw NodeInfo => node num: {}, user: {:?}",
+                        nodeinfo.num,
+                        nodeinfo.user
+                    );
+                }
+                PayloadVariant::Config(cfg) => {
+                    log::info!("saw Config: {:?}", cfg);
+                }
+                PayloadVariant::Channel(ch) => {
+                    log::info!(
+                        "Saw Channel => index: {}, settings: {:?}",
+                        ch.index,
+                        ch.settings
+                    );
+                }
+                PayloadVariant::ModuleConfig(mod_cfg) => {
+                    log::info!("Saw ModuleConfig => partial config: {:?}", mod_cfg);
+                }
+                other => {
+                    log::debug!("Saw: {:?}", other);
+                }
+            }
+        } else {
+            log::warn!("No payload_variant in this FromRadio message");
+        }
+    }
+
+    // If we get here, the channel closed with no ConfigCompleteId found
+    Err(LinkError::internal_error(
+        "Channel closed before ConfigCompleteId",
+    ))
 }
 
 /// The nostr msgid for notes or a content hash for other messages

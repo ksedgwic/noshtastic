@@ -62,7 +62,7 @@ impl Sync {
         task::spawn(async move {
             debug!("negentropy sync starting");
             sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
-            let mut interval = time::interval(Duration::from_secs(5 * 60));
+            let mut interval = time::interval(Duration::from_secs(2 * 60));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {

@@ -1,1 +1,4 @@
 edition = "2021"
+
+# needs nightly
+# imports_granularity="Crate"

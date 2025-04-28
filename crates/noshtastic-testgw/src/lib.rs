@@ -3,11 +3,12 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-use enostr::ewebsock::{WsEvent, WsMessage};
-use enostr::RelayPool;
+use enostr::{
+    ewebsock::{WsEvent, WsMessage},
+    RelayPool,
+};
 use log::*;
-use nostrdb::Filter;
-use nostrdb::Ndb;
+use nostrdb::{Filter, Ndb};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 

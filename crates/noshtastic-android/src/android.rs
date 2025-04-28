@@ -3,35 +3,26 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-use android_logger::Config as AndroidLogConfig;
-use android_logger::Filter;
-use android_logger::FilterBuilder;
+use android_logger::{Config as AndroidLogConfig, Filter, FilterBuilder};
 use anyhow::{Context, Result};
 use btleplug;
 use chrono::Local;
-use jni::objects::GlobalRef;
-use jni::objects::{JObject, JValue};
-use jni::sys::jint;
-use jni::JNIEnv;
-use jni::JavaVM;
+use jni::{
+    objects::{GlobalRef, JClass, JObject, JString, JValue},
+    sys::{jint, jobjectArray},
+    JNIEnv, JavaVM,
+};
 use log::*;
 use nostrdb::{Config, Ndb};
 use once_cell::sync::{Lazy, OnceCell};
-use std::os::raw::c_void;
-use std::sync::{Arc, Mutex};
+use std::{
+    os::raw::c_void,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::Notify;
 
-use noshtastic_link::create_link;
-use noshtastic_link::LinkRef;
-use noshtastic_sync::sync::SyncRef;
-use noshtastic_sync::Sync;
-
-// BLE device to connect to
-// kmem:
-static MAYBE_HINT: Lazy<Option<String>> = Lazy::new(|| Some("64:E8:33:47:07:C1".to_string()));
-// static MAYBE_HINT: Lazy<Option<String>> = Lazy::new(|| Some("D4:73:31:4E:9F:3B".to_string()));
-// eph2: D4:73:31:4E:9F:3B
-// kmem: 64:E8:33:47:07:C1
+use noshtastic_link::{self, LinkRef};
+use noshtastic_sync::{sync::SyncRef, Sync};
 
 // Our global tokio runtime handle
 static GLOBAL_RT: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
@@ -318,32 +309,63 @@ pub extern "system" fn Java_com_bonsai_noshtastic_MainActivity_onCreateNative(
     info!("onCreateNative finished");
 }
 
-/// Called from Java after BLE permissions are granted
 #[no_mangle]
-pub extern "system" fn Java_com_bonsai_noshtastic_MainActivity_startNoshtastic(
-    _env: JNIEnv,
-    _activity: JObject,
+pub extern "system" fn Java_com_bonsai_noshtastic_MainActivity_scanForRadios(
+    env: JNIEnv,
+    _class: JClass,
+) -> jobjectArray {
+    info!("scanForRadios starting");
+    let radio_list = GLOBAL_RT
+        .get()
+        .expect("Tokio runtime not initialized")
+        .block_on(async { noshtastic_link::scan_for_radios().await })
+        .expect("scan_for_radios failed");
+    let string_class = env
+        .find_class("java/lang/String")
+        .expect("Cannot find java/lang/String");
+    let result_array = env
+        .new_object_array(radio_list.len() as i32, string_class, JObject::null())
+        .expect("Failed to create new String array");
+    for (i, name) in radio_list.iter().enumerate() {
+        let jname = env.new_string(name).expect("Failed to create jstring");
+        env.set_object_array_element(result_array, i as i32, jname)
+            .expect("Failed to set element in String array");
+    }
+    info!("scanForRadios finished with {:?}", radio_list);
+    result_array
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_bonsai_noshtastic_MainActivity_connectToRadio(
+    env: JNIEnv,
+    _class: JClass,
+    jname: JString,
 ) {
-    info!("startNoshtastic starting");
+    let radio_name: String = env
+        .get_string(jname)
+        .expect("Failed to retrieve Java string")
+        .into();
+
     GLOBAL_RT
         .get()
         .expect("GLOBAL_RT was never set!")
-        .spawn(async {
-            match setup_noshtastic().await {
+        .spawn(async move {
+            match setup_noshtastic(&radio_name).await {
                 Ok(()) => debug!("setup_noshtastic finished"),
                 Err(e) => error!("setup_noshtastic failed: {e:?}"),
             }
         });
-    info!("startNoshtastic finished");
 }
 
-async fn setup_noshtastic() -> Result<()> {
+async fn setup_noshtastic(radio_name: &str) -> Result<()> {
     debug!("setup noshtastic starting");
     let stop_signal = Arc::new(Notify::new());
+    let maybe_hint = Some(radio_name.to_string());
 
-    let (linkref, link_tx, link_rx) = create_link(&MAYBE_HINT, stop_signal.clone())
-        .await
-        .context("create_link failed")?;
+    let (linkref, link_tx, link_rx) =
+        noshtastic_link::create_link(&maybe_hint, stop_signal.clone())
+            .await
+            .context("create_link failed")?;
 
     let ndb = init_nostrdb().context("init_nostrdb failed")?;
     let syncref = Sync::new(ndb, link_tx, link_rx, stop_signal).context("Sync::new failed")?;

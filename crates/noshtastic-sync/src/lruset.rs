@@ -3,8 +3,7 @@
 // GNU General Public License, version 3 or later. See the LICENSE file
 // or <https://www.gnu.org/licenses/> for details.
 
-use std::collections::HashSet;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug)]
 pub struct LruSet<T> {
