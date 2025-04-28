@@ -134,6 +134,7 @@ impl Outgoing {
                     .or_else(|| queues.low.pop_front())
                 {
                     Some((msgid, frame)) => {
+                        let qlens = vec![queues.high.len(), queues.normal.len(), queues.low.len()];
                         drop(queues);
 
                         // Serialize the LinkFrame into bytes
@@ -147,7 +148,12 @@ impl Outgoing {
                         {
                             let mut link = linkref.lock().await;
 
-                            debug!("sending LinkFrame {}, sz: {}", msgid, buffer.len());
+                            debug!(
+                                "qlens: {:?}: sending LinkFrame {}, sz: {}",
+                                qlens,
+                                msgid,
+                                buffer.len()
+                            );
                             let mut router = LinkPacketRouter {
                                 my_id: link.my_node_num.into(),
                             };

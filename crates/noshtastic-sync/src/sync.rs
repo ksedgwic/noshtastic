@@ -204,7 +204,7 @@ impl Sync {
                     .reconcile(&negmsg.data, &mut have_ids, &mut need_ids)
                 {
                     Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
-                    Ok(None) => info!("synchronized with remote"),
+                    Ok(None) => info!("SYNCHRONIZED WITH REMOTE"),
                     Ok(Some(nextmsg)) => {
                         if let Err(err) = sync.send_negentropy_message(&nextmsg, false) {
                             error!("trouble queueing next negentropy message: {:?}", err);
