@@ -161,7 +161,9 @@ impl Link {
             Some(from_radio::PayloadVariant::Packet(mesh_packet)) => {
                 Self::handle_mesh_packet(linkref, mesh_packet).await;
             }
-            _ => {} // Ignore other variants
+            other => {
+                log::debug!("fromradio: {:?}", other);
+            }
         }
     }
 
