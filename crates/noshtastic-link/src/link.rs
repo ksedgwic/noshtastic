@@ -10,7 +10,10 @@ use meshtastic::{
     protobufs::{from_radio, mesh_packet, FromRadio, MeshPacket, PortNum},
 };
 use prost::Message;
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::{
     sync::{mpsc, Notify},
     task,
@@ -25,6 +28,7 @@ use crate::{
 const LINK_VERSION: u32 = 1;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_FRAG_THRESH: usize = 200;
+const LINK_STALE_SECS: i64 = 300; // messages older than this are considered stale
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
@@ -171,8 +175,17 @@ impl Link {
     async fn handle_mesh_packet(linkref: &LinkRef, mesh_packet: MeshPacket) {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
         {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs() as i64;
+            let age = now - mesh_packet.rx_time as i64;
+            if age > LINK_STALE_SECS {
+                debug!("skipping stale message: {} secs old", age);
+                return;
+            }
             if decoded.portnum() == PortNum::PrivateApp {
-                debug!("received LinkFrame, sz: {}", decoded.payload.len());
+                debug!("received LinkFrame, sz: {}", decoded.payload.len(),);
                 match LinkFrame::decode(&*decoded.payload) {
                     Ok(link_frame) => Self::handle_link_frame(linkref, link_frame).await,
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
