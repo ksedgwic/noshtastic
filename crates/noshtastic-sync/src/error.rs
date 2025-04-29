@@ -23,10 +23,7 @@ pub enum SyncError {
     LinkError(#[from] noshtastic_link::LinkError),
 
     #[error("sync: nostr event error: {0}")]
-    NostrEventError(#[from] nostr::event::Error),
-
-    #[error("sync: nostr event id error: {0}")]
-    NostrEventIdError(#[from] nostr::event::id::Error),
+    NostrEventIdError(#[from] nostr::event::Error),
 
     #[error("sync: nostr event tag error: {0}")]
     NostrEventTagError(#[from] nostr::event::tag::Error),

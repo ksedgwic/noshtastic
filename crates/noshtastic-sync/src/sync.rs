@@ -5,7 +5,7 @@
 
 use futures::StreamExt;
 use log::*;
-use nostrdb::{Filter, Ndb, NoteKey, Transaction};
+use nostrdb::{Filter, IngestMetadata, Ndb, NoteKey, Transaction};
 use prost::Message;
 use rand::{seq::SliceRandom, thread_rng};
 use std::{
@@ -226,7 +226,10 @@ impl Sync {
     fn handle_raw_note(&mut self, msgid: MsgId, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
             debug!("saw RawNote {}: {}", msgid, utf8_str);
-            if let Err(err) = self.ndb.process_client_event(utf8_str) {
+            if let Err(err) = self
+                .ndb
+                .process_event_with(&utf8_str, IngestMetadata::new().client(true))
+            {
                 error!(
                     "ndb process_client_event (raw) failed: {}: {:?}",
                     &utf8_str, err
@@ -241,7 +244,10 @@ impl Sync {
     fn handle_enc_note(&mut self, msgid: MsgId, enc_note: EncNote) {
         let utf8_str = enc_note.to_string();
         debug!("saw EncNote {}: {}", msgid, utf8_str);
-        if let Err(err) = self.ndb.process_client_event(&utf8_str) {
+        if let Err(err) = self
+            .ndb
+            .process_event_with(&utf8_str, IngestMetadata::new().client(true))
+        {
             error!(
                 "ndb process_client_event (enc) failed: {}: {:?}",
                 &utf8_str, err

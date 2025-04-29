@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
     let (_linkref, link_tx, link_rx) = create_link(&args.serial, stop_signal.clone()).await?;
     let syncref = Sync::new(ndb.clone(), link_tx, link_rx, stop_signal.clone())?;
 
-    testgw.start()?;
+    testgw.start().await?;
     if args.enable_ping {
         // give the config a chance to settle before pinging
         sleep(Duration::from_secs(5)).await;
