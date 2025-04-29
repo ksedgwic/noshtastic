@@ -165,7 +165,7 @@ impl Outgoing {
                             let echo_response = false;
                             let reply_id: Option<u32> = None;
                             let emoji: Option<u32> = None;
-                            if let Err(err) = link
+                            match link
                                 .stream_api
                                 .send_mesh_packet(
                                     &mut router,
@@ -181,7 +181,8 @@ impl Outgoing {
                                 )
                                 .await
                             {
-                                error!("send_mesh_packet failed {:?}", err);
+                                Ok(mesh_packet_id) => debug!("mesh_packet_id: {}", mesh_packet_id),
+                                Err(err) => error!("send_mesh_packet failed {:?}", err),
                             }
                         }
 
