@@ -19,6 +19,8 @@ use tokio::{
 
 use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
+const LINK_TX_RATE_LIMIT_SECS: u64 = 2;
+
 #[derive(Debug)]
 struct Queues {
     low: VecDeque<(MsgId, LinkFrame)>,
@@ -188,7 +190,7 @@ impl Outgoing {
 
                         // IMPORTANT - it's important not to overload the mesh
                         // network.  Don't send packets back-to-back!
-                        sleep(Duration::from_secs(5)).await;
+                        sleep(Duration::from_secs(LINK_TX_RATE_LIMIT_SECS)).await;
                     }
                     None => {
                         drop(queues);
