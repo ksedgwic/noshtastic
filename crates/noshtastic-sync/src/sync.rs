@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use noshtastic_link::{
-    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, MsgId, Priority,
+    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId, Priority,
 };
 
 use crate::{
@@ -27,7 +27,10 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
+const SYNC_NEGENTROPY_INITIATE_SECS: u64 = 2 * 60;
+
 pub struct Sync {
+    stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
@@ -45,6 +48,7 @@ impl Sync {
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let syncref = Arc::new(Mutex::new(Sync {
+            stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
             ping_duration: None,
@@ -54,15 +58,21 @@ impl Sync {
         }));
         Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
         Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
-        Self::start_negentropy_sync(syncref.clone(), stop_signal.clone())?;
         Ok(syncref)
+    }
+
+    // called when the link is ready
+    fn link_ready(syncref: SyncRef) {
+        let sync = syncref.lock().unwrap();
+        if let Err(err) = Self::start_negentropy_sync(syncref.clone(), sync.stop_signal.clone()) {
+            error!("trouble in start_negentropy_sync: {:?}", err);
+        }
     }
 
     fn start_negentropy_sync(syncref: SyncRef, stop_signal: Arc<Notify>) -> SyncResult<()> {
         task::spawn(async move {
             debug!("negentropy sync starting");
-            sleep(Duration::from_secs(5)).await; // give ndb a chance to get setup
-            let mut interval = time::interval(Duration::from_secs(2 * 60));
+            let mut interval = time::interval(Duration::from_secs(SYNC_NEGENTROPY_INITIATE_SECS));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -156,17 +166,24 @@ impl Sync {
             loop {
                 tokio::select! {
                     Some(msg) = receiver.recv() => {
-                        match SyncMessage::decode(&msg.data[..]) {
-                            Ok(decoded) => {
-                                Self::handle_sync_message(syncref.clone(), msg.msgid, decoded)
+                        match msg {
+                            LinkMessage::Ready => {
+                                Self::link_ready(syncref.clone());
                             },
-                            Err(e) => error!("Failed to decode message: {}", e),
+                            LinkMessage::Payload(payload) => {
+                                match SyncMessage::decode(&payload.data[..]) {
+                                    Ok(decoded) => {
+                                        Self::handle_sync_message(
+                                            syncref.clone(), payload.msgid, decoded)
+                                    },
+                                    Err(e) => error!("Failed to decode message: {}", e),
+                                }
+                            },
                         }
-                    }
+                    },
                     _ = stop_signal.notified() => {
                         break;
-                    }
-
+                    },
                 }
                 info!("sync message handler finished");
             }
@@ -291,11 +308,11 @@ impl Sync {
             let runtime = tokio::runtime::Handle::current();
             runtime.block_on(async {
                 self.link_tx
-                    .send(LinkMessage {
+                    .send(LinkMessage::Payload(LinkPayload {
                         msgid,
                         data: buffer,
                         options,
-                    })
+                    }))
                     .await
             })
         })

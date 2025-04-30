@@ -95,25 +95,33 @@ impl LinkOptionsBuilder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkMessage {
+pub struct LinkPayload {
     pub msgid: MsgId,
     pub options: LinkOptions,
     pub data: Vec<u8>,
 }
 
-impl LinkMessage {
+impl LinkPayload {
     pub fn to_bytes(&self) -> &[u8] {
         &self.data
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkMessage {
+    // link is ready, sent upstream to client
+    Ready,
+    // link data payload, used in both directions
+    Payload(LinkPayload),
+}
+
 impl From<LinkMsg> for LinkMessage {
     fn from(msg: LinkMsg) -> Self {
-        LinkMessage {
+        LinkMessage::Payload(LinkPayload {
             msgid: MsgId::new(msg.msgid, None),
             options: LinkOptionsBuilder::new().build(),
             data: msg.data,
-        }
+        })
     }
 }
 

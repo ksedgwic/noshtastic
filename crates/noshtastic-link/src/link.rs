@@ -17,18 +17,19 @@ use std::{
 use tokio::{
     sync::{mpsc, Notify},
     task,
-    time::{self, Duration},
+    time::{self, Duration, Instant},
 };
 
 use crate::{
     outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkFrag, LinkFrame, LinkMessage,
-    LinkMsg, LinkOptionsBuilder, LinkResult, MsgId, Payload, Priority,
+    LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
 };
 
 const LINK_VERSION: u32 = 1;
 const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_FRAG_THRESH: usize = 200;
 const LINK_STALE_SECS: i64 = 300; // messages older than this are considered stale
+const LINK_READY_HOLDOFF_SECS: u64 = 5; // wait this long after settled
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
@@ -37,6 +38,8 @@ pub struct Link {
     pub(crate) my_node_num: u32,
     fragcache: FragmentCache,
     outgoing: Outgoing,
+    ready_deadline: Instant,
+    declared_ready: bool,
 }
 pub type LinkRef = Arc<tokio::sync::Mutex<Link>>;
 
@@ -53,6 +56,8 @@ impl Link {
             my_node_num: 0,
             fragcache: FragmentCache::new(),
             outgoing: Outgoing::new(),
+            ready_deadline: Instant::now() + Duration::from_secs(LINK_READY_HOLDOFF_SECS),
+            declared_ready: false,
         }
     }
 
@@ -82,6 +87,9 @@ impl Link {
             .await
             .outgoing
             .start_regulator(linkref.clone())?;
+
+        // Check for link ready
+        Link::start_check_ready(linkref.clone(), stop_signal.clone())?;
 
         Ok(())
     }
@@ -125,6 +133,43 @@ impl Link {
             info!("fragcache_periodic finished");
         });
         Ok(())
+    }
+
+    fn start_check_ready(linkref: LinkRef, stop_signal: Arc<Notify>) -> LinkResult<()> {
+        let mut interval = time::interval(Duration::from_secs(1));
+        task::spawn(async move {
+            info!("check_ready starting");
+            loop {
+                tokio::select! {
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        if Self::maybe_declare_ready(linkref.clone()).await {
+                            break;
+                        }
+                    }
+                }
+            }
+            info!("check_ready finished");
+        });
+        Ok(())
+    }
+
+    async fn maybe_declare_ready(linkref: LinkRef) -> bool {
+        let mut link = linkref.lock().await;
+        if link.declared_ready {
+            return true;
+        }
+        if Instant::now() >= link.ready_deadline {
+            // Mark as ready!
+            if let Err(err) = link.client_out_tx.send(LinkMessage::Ready).await {
+                error!("maybe_declare_ready: failed to send message: {}", err);
+            }
+            link.declared_ready = true;
+            return true;
+        }
+        false
     }
 
     async fn send_fragment_retries(linkref: LinkRef) {
@@ -171,6 +216,11 @@ impl Link {
         }
     }
 
+    async fn postpone_ready(linkref: &LinkRef) {
+        let mut link = linkref.lock().await;
+        link.ready_deadline = Instant::now() + Duration::from_secs(LINK_READY_HOLDOFF_SECS);
+    }
+
     // Handle mesh packets
     async fn handle_mesh_packet(linkref: &LinkRef, mesh_packet: MeshPacket) {
         if let Some(mesh_packet::PayloadVariant::Decoded(ref decoded)) = mesh_packet.payload_variant
@@ -182,6 +232,7 @@ impl Link {
             let age = now - mesh_packet.rx_time as i64;
             if age > LINK_STALE_SECS {
                 debug!("skipping stale message: {} secs old", age);
+                Self::postpone_ready(linkref).await;
                 return;
             }
             if decoded.portnum() == PortNum::PrivateApp {
@@ -338,17 +389,20 @@ impl Link {
     }
 
     async fn send_link_message(linkref: LinkRef, msg: LinkMessage) -> LinkResult<()> {
-        if msg.data.len() > LINK_FRAG_THRESH {
-            Ok(Self::send_fragments(linkref, msg).await?)
+        let LinkMessage::Payload(payload) = msg else {
+            panic!("This routine requires a payload message");
+        };
+        if payload.data.len() > LINK_FRAG_THRESH {
+            Ok(Self::send_fragments(linkref, payload).await?)
         } else {
-            Ok(Self::send_complete(linkref, msg).await?)
+            Ok(Self::send_complete(linkref, payload).await?)
         }
     }
 
-    async fn send_complete(linkref: LinkRef, msg: LinkMessage) -> LinkResult<()> {
+    async fn send_complete(linkref: LinkRef, payload: LinkPayload) -> LinkResult<()> {
         let link_msg = LinkMsg {
-            msgid: msg.msgid.base,
-            data: msg.data.clone(),
+            msgid: payload.msgid.base,
+            data: payload.data.clone(),
         };
         let link_frame = LinkFrame {
             magic: LINK_MAGIC,
@@ -358,25 +412,25 @@ impl Link {
         let mut link = linkref.lock().await;
         let outcome = link
             .outgoing
-            .enqueue(msg.msgid, link_frame, msg.options)
+            .enqueue(payload.msgid, link_frame, payload.options)
             .await;
         debug!(
             "queueing complete LinkMsg {} w/ payload sz: {} => {}",
-            msg.msgid,
-            msg.data.len(),
+            payload.msgid,
+            payload.data.len(),
             outcome
         );
         Ok(())
     }
 
-    async fn send_fragments(linkref: LinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let data = &msg.data;
-        let numfrag: u32 = msg.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
+    async fn send_fragments(linkref: LinkRef, payload: LinkPayload) -> LinkResult<()> {
+        let data = &payload.data;
+        let numfrag: u32 = payload.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
         let rotoff = 0;
         let mut link = linkref.lock().await;
         for (fragndx, chunk) in (0_u32..).zip(data.chunks(LINK_FRAG_THRESH)) {
             let link_frag = LinkFrag {
-                msgid: msg.msgid.base,
+                msgid: payload.msgid.base,
                 numfrag,
                 fragndx,
                 rotoff,
@@ -393,10 +447,10 @@ impl Link {
             // If you are trying to induce packet failure to test retries this
             // is a good spot to just `continue` w/o sending the packet ...
 
-            let msgid = MsgId::new(msg.msgid.base, Some(fragndx));
+            let msgid = MsgId::new(payload.msgid.base, Some(fragndx));
             let outcome = link
                 .outgoing
-                .enqueue(msgid, link_frame, msg.options.clone())
+                .enqueue(msgid, link_frame, payload.options.clone())
                 .await;
             debug!(
                 "queueing LinkFrag {}/{} payload sz: {} => {}",
