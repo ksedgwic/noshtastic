@@ -108,6 +108,12 @@ impl LogLineWriter {
     }
 }
 
+impl Default for LogLineWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::io::Write for LogLineWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let text = match std::str::from_utf8(buf) {

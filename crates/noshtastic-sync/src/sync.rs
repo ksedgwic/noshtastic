@@ -245,7 +245,7 @@ impl Sync {
             debug!("saw RawNote {}: {}", msgid, utf8_str);
             if let Err(err) = self
                 .ndb
-                .process_event_with(&utf8_str, IngestMetadata::new().client(true))
+                .process_event_with(utf8_str, IngestMetadata::new().client(true))
             {
                 error!(
                     "ndb process_client_event (raw) failed: {}: {:?}",
