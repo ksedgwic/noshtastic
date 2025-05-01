@@ -22,8 +22,8 @@ chrono = "0.4"
 env_logger = "0.11"
 hex = "0.4"
 log = "0.4"
-nostrdb = { git = "https://github.com/damus-io/nostrdb-rs", rev = "df03575b0a0133d8700e90d538c01d253f4a480a" }
-#nostrdb = "0.5"
+nostrdb = "0.6"
 prost = "0.11"
+serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.42", features = ["full"] }

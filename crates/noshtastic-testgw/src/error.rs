@@ -19,8 +19,11 @@ pub enum TestGWError {
     #[error("testgw: internal error: {0}")]
     InternalError(String),
 
-    #[error("testgw: enostr error: {0}")]
-    EnostrError(#[from] enostr::Error),
+    #[error("testgw: nostr_relay_pool error: {0}")]
+    RelayPoolError(#[from] nostr_relay_pool::pool::Error),
+
+    #[error("testgw: serde_json error: {0}")]
+    SerdeJsonError(#[from] serde_json::Error),
 
     #[error("testgw: nostrdb error: {0}")]
     NostrdbError(#[from] nostrdb::Error),

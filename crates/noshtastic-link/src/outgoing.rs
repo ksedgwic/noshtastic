@@ -19,6 +19,8 @@ use tokio::{
 
 use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
+const LINK_TX_RATE_LIMIT_SECS: u64 = 2;
+
 #[derive(Debug)]
 struct Queues {
     low: VecDeque<(MsgId, LinkFrame)>,
@@ -134,6 +136,7 @@ impl Outgoing {
                     .or_else(|| queues.low.pop_front())
                 {
                     Some((msgid, frame)) => {
+                        let qlens = vec![queues.high.len(), queues.normal.len(), queues.low.len()];
                         drop(queues);
 
                         // Serialize the LinkFrame into bytes
@@ -147,7 +150,12 @@ impl Outgoing {
                         {
                             let mut link = linkref.lock().await;
 
-                            debug!("sending LinkFrame {}, sz: {}", msgid, buffer.len());
+                            debug!(
+                                "qlens: {:?}: sending LinkFrame {}, sz: {}",
+                                qlens,
+                                msgid,
+                                buffer.len()
+                            );
                             let mut router = LinkPacketRouter {
                                 my_id: link.my_node_num.into(),
                             };
@@ -159,7 +167,7 @@ impl Outgoing {
                             let echo_response = false;
                             let reply_id: Option<u32> = None;
                             let emoji: Option<u32> = None;
-                            if let Err(err) = link
+                            match link
                                 .stream_api
                                 .send_mesh_packet(
                                     &mut router,
@@ -175,13 +183,14 @@ impl Outgoing {
                                 )
                                 .await
                             {
-                                error!("send_mesh_packet failed {:?}", err);
+                                Ok(mesh_packet_id) => debug!("mesh_packet_id: {}", mesh_packet_id),
+                                Err(err) => error!("send_mesh_packet failed {:?}", err),
                             }
                         }
 
                         // IMPORTANT - it's important not to overload the mesh
                         // network.  Don't send packets back-to-back!
-                        sleep(Duration::from_secs(5)).await;
+                        sleep(Duration::from_secs(LINK_TX_RATE_LIMIT_SECS)).await;
                     }
                     None => {
                         drop(queues);
