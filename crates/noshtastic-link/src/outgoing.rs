@@ -146,6 +146,9 @@ impl Outgoing {
                             continue;
                         }
 
+                        // Escape a pathological sequence (see noshtastic#15)
+                        let escaped_buffer = crate::escape94c3(&buffer);
+
                         // scope the link lock
                         {
                             let mut link = linkref.lock().await;
@@ -154,7 +157,7 @@ impl Outgoing {
                                 "qlens: {:?}: sending LinkFrame {}, sz: {}",
                                 qlens,
                                 msgid,
-                                buffer.len()
+                                escaped_buffer.len()
                             );
                             let mut router = LinkPacketRouter {
                                 my_id: link.my_node_num.into(),
@@ -171,7 +174,7 @@ impl Outgoing {
                                 .stream_api
                                 .send_mesh_packet(
                                     &mut router,
-                                    buffer.into(),
+                                    escaped_buffer.into(),
                                     port_num,
                                     destination,
                                     channel,
