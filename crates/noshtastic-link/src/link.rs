@@ -11,6 +11,7 @@ use meshtastic::{
 };
 use prost::Message;
 use std::{
+    io::Cursor,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -237,7 +238,11 @@ impl Link {
             }
             if decoded.portnum() == PortNum::PrivateApp {
                 debug!("received LinkFrame, sz: {}", decoded.payload.len(),);
-                match LinkFrame::decode(&*decoded.payload) {
+
+                // Unescape a pathological sequence (see noshtastic#15)
+                let payload = crate::unescape94c3(&decoded.payload).expect("unescaped");
+
+                match LinkFrame::decode(Cursor::new(payload)) {
                     Ok(link_frame) => Self::handle_link_frame(linkref, link_frame).await,
                     Err(err) => error!("Failed to decode LinkFrame: {:?}", err),
                 }

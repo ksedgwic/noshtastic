@@ -294,6 +294,56 @@ impl fmt::Debug for MsgId {
     }
 }
 
+// Encodes a binary buffer to avoid the 0x94C3 sequence and escapes 0xEE (See noshtastic#15)
+pub(crate) fn escape94c3(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut i = 0;
+    while i < data.len() {
+        if i + 1 < data.len() && data[i] == 0x94 && data[i + 1] == 0xC3 {
+            out.push(0xEE);
+            out.push(0x01);
+            i += 2;
+        } else if data[i] == 0xEE {
+            out.push(0xEE);
+            out.push(0x00);
+            i += 1;
+        } else {
+            out.push(data[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+// Decodes a buffer that was previously encoded with `encode` (See noshtastic#15)
+pub(crate) fn unescape94c3(encoded: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(encoded.len());
+    let mut i = 0;
+    while i < encoded.len() {
+        if encoded[i] == 0xEE {
+            if i + 1 >= encoded.len() {
+                return Err("truncated escape sequence".into());
+            }
+            match encoded[i + 1] {
+                0x00 => {
+                    out.push(0xEE);
+                    i += 2;
+                }
+                0x01 => {
+                    out.push(0x94);
+                    out.push(0xC3);
+                    i += 2;
+                }
+                _ => return Err(format!("invalid escape code {:02x}", encoded[i + 1])),
+            }
+        } else {
+            out.push(encoded[i]);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +368,53 @@ mod tests {
         let msgid2 = MsgId::new(asint, None);
         let msg_id2_str = format!("{}", msgid2);
         assert_eq!(msg_id_str, msg_id2_str);
+    }
+
+    #[test]
+    fn test_escape_and_unescape_roundtrip() {
+        let input = vec![0x10, 0x94, 0xC3, 0xEE, 0x20];
+        let encoded = escape94c3(&input);
+        let decoded = unescape94c3(&encoded).expect("decode failed");
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn test_escape_only_94c3() {
+        let input = vec![0x94, 0xC3];
+        let encoded = escape94c3(&input);
+        assert_eq!(encoded, vec![0xEE, 0x01]);
+    }
+
+    #[test]
+    fn test_escape_only_ee() {
+        let input = vec![0xEE];
+        let encoded = escape94c3(&input);
+        assert_eq!(encoded, vec![0xEE, 0x00]);
+    }
+
+    #[test]
+    fn test_link_payload_escape_roundtrip() {
+        let payload = LinkPayload {
+            msgid: MsgId::new(123, None),
+            options: LinkOptionsBuilder::new().build(),
+            data: vec![0x94, 0xC3, 0xEE, 0x01],
+        };
+        let escaped = payload.escape94c3();
+        let unescaped = escaped.unescape94c3().expect("unescape failed");
+        assert_eq!(unescaped, payload);
+    }
+
+    #[test]
+    fn test_unescape_invalid_sequence() {
+        let input = vec![0xEE, 0xFF];
+        let result = unescape94c3(&input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unescape_truncated_sequence() {
+        let input = vec![0xEE];
+        let result = unescape94c3(&input);
+        assert!(result.is_err());
     }
 }
