@@ -19,7 +19,7 @@ use tokio::{
 
 use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
-const LINK_TX_RATE_LIMIT_SECS: u64 = 2;
+const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
 
 #[derive(Debug)]
 struct Queues {
