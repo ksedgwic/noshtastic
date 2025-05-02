@@ -380,16 +380,6 @@ impl Sync {
         )
     }
 
-    // fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
-    //     info!("queueing RawNote {} sz: {}", msgid, note_json.len());
-    //     let raw_note = Payload::RawNote(RawNote {
-    //         data: note_json.as_bytes().to_vec(),
-    //     });
-    //     self.queue_outgoing_message(
-    //         msgid, Some(raw_note), LinkOptionsBuilder::new().action(Action::Drop).build()
-    //     )
-    // }
-
     fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
         info!("queueing EncNote {} sz: {}", msgid, note_json.len());
         let enc_note = Payload::EncNote(EncNote::try_from(note_json)?);
