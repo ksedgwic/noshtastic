@@ -117,16 +117,18 @@ public class MainActivity extends Activity {
 
     private void startBleScan() {
         new Thread(() -> {
-            String[] localRadioNames = scanForRadios();
-            if (localRadioNames == null) {
-                localRadioNames = new String[0];
-            }
-
-            // The lambda can capture finalRadioNames because we never reassign it
-            final String[] finalRadioNames = localRadioNames;
-
-            // Post the UI update back to the main thread
-            runOnUiThread(() -> showRadioSelectionDialog(finalRadioNames));
+                String[] localRadioNames = scanForRadios();
+                if (localRadioNames == null) {
+                    localRadioNames = new String[0];
+                }
+                if (localRadioNames.length == 1) {
+                    // Only one radio: skip dialog and connect directly
+                    showLogViewAndConnect(localRadioNames[0]);
+                } else {
+                    // Multiple or zero radios: show dialog on UI thread
+                    final String[] finalRadioNames = localRadioNames;
+                    runOnUiThread(() -> showRadioSelectionDialog(finalRadioNames));
+                }
         }).start();
     }
 
