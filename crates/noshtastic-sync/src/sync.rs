@@ -27,7 +27,7 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
-const SYNC_NEGENTROPY_INITIATE_SECS: u64 = 5 * 60;
+const SYNC_NEGENTROPY_INITIATE_SECS: u64 = 10 * 60;
 
 pub struct Sync {
     stop_signal: Arc<Notify>,
