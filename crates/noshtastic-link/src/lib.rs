@@ -399,9 +399,9 @@ mod tests {
             options: LinkOptionsBuilder::new().build(),
             data: vec![0x94, 0xC3, 0xEE, 0x01],
         };
-        let escaped = payload.escape94c3();
-        let unescaped = escaped.unescape94c3().expect("unescape failed");
-        assert_eq!(unescaped, payload);
+        let escaped = escape94c3(&payload.data);
+        let unescaped = unescape94c3(&escaped).expect("unescape failed");
+        assert_eq!(unescaped, payload.data);
     }
 
     #[test]
