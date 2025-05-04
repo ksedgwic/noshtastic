@@ -30,7 +30,8 @@ use crate::{
 
 const SYNC_NOTE_IDLE_SECS: u64 = 120;
 const SYNC_RECONCILE_IDLE_SECS: u64 = 60;
-const SYNC_OUTGOING_QUEUE_THRESH: usize = 4;
+const SYNC_OUTGOING_REFILL_THRESH: usize = 10;
+const SYNC_OUTGOING_PAUSE_THRESH: usize = 50;
 
 pub struct Sync {
     _stop_signal: Arc<Notify>,
@@ -43,6 +44,7 @@ pub struct Sync {
     is_link_ready: bool,
     last_sync_recv: Instant,
     last_note_recv: Instant,
+    pause_sync: bool, // true when we have too many outgoing messages
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -65,6 +67,7 @@ impl Sync {
             is_link_ready: false,
             last_sync_recv: long_ago,
             last_note_recv: long_ago,
+            pause_sync: false,
         }));
         Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
         Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
@@ -87,31 +90,46 @@ impl Sync {
             sync.last_note_recv.elapsed().as_secs(),
         );
 
+        // There are two levels of sync participation:
+        // sync initiation     - initiate a sync protocol exchange
+        // sync reconciliation - respond to sync protocol from other notes
+
+        // if we have too many outgoing messages pause sync reconciliation
+        let old_pause_sync = sync.pause_sync;
+        sync.pause_sync = info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_PAUSE_THRESH;
+        if sync.pause_sync != old_pause_sync {
+            if sync.pause_sync {
+                info!("outgoing queues full, pausing sync reconciliation");
+            } else {
+                info!("outgoing queues not full, resuming sync reconciliation");
+            }
+        }
+
         // This routine should decide when to initiate negentropy messages
 
         if !sync.is_link_ready {
-            info!("link is not ready, skip negentropy initiate");
+            info!("link is not ready, defer sync initiation");
             return;
         }
 
         if sync.last_note_recv.elapsed().as_secs() < SYNC_NOTE_IDLE_SECS {
-            info!("currently receiving notes, skip negentropy initiate");
+            info!("recently receiving notes, defer sync initiation");
             return;
         }
 
         if sync.last_sync_recv.elapsed().as_secs() < SYNC_RECONCILE_IDLE_SECS {
-            info!("currently reconciling, skip negentropy initiate");
+            info!("recently reconciling, defer sync initiation");
             return;
         }
 
-        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_QUEUE_THRESH {
-            info!("outgoing queues not empty, skip negentropy initiate");
+        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_REFILL_THRESH {
+            info!("outgoing queues above refill threshold, defer sync initiation");
             return;
         }
 
         // if we make it here initiate a negentropy exchange
         match sync.negentropy.initiate() {
-            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
+            Err(err) => error!("trouble in sync initiation: {:?}", err),
             Ok(negbytes) => {
                 if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
                     error!("trouble queueing negentropy message: {:?}", err);
@@ -244,6 +262,10 @@ impl Sync {
             Some(Payload::Negentropy(negmsg)) => {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
                 sync.last_sync_recv = Instant::now();
+                if sync.pause_sync {
+                    info!("outgoing queues full, pausing sync reconciliation");
+                    return;
+                }
                 let mut have_ids = vec![];
                 let mut need_ids = vec![];
                 match sync
