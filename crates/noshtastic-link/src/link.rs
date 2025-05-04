@@ -196,6 +196,14 @@ impl Link {
                 error!("maybe_declare_ready: failed to send message: {}", err);
             }
             link.declared_ready = true;
+
+            // Follow with an immediate NodeInfo so we can initiate right away
+            let qlen = link.outgoing.qlen().await;
+            let info = LinkInfo { qlen };
+            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)).await {
+                error!("send link info: failed to send message: {}", err);
+            }
+
             return true;
         }
         false

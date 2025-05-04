@@ -28,16 +28,19 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
-const SYNC_NEGENTROPY_INITIATE_SECS: u64 = 10 * 60;
+const SYNC_NOTE_IDLE_SECS: u64 = 120;
+const SYNC_RECONCILE_IDLE_SECS: u64 = 60;
+const SYNC_OUTGOING_QUEUE_THRESH: usize = 4;
 
 pub struct Sync {
-    stop_signal: Arc<Notify>,
+    _stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
     recently_inserted: LruSet<MsgId>,
     negentropy: NegentropyState,
+    is_link_ready: bool,
     last_sync_recv: Instant,
     last_note_recv: Instant,
 }
@@ -52,13 +55,14 @@ impl Sync {
     ) -> SyncResult<SyncRef> {
         let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
         let syncref = Arc::new(Mutex::new(Sync {
-            stop_signal: stop_signal.clone(),
+            _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
             negentropy: NegentropyState::new(ndb.clone()),
+            is_link_ready: false,
             last_sync_recv: long_ago,
             last_note_recv: long_ago,
         }));
@@ -69,37 +73,51 @@ impl Sync {
 
     // called when the link is ready
     fn link_ready(syncref: SyncRef) {
-        let sync = syncref.lock().unwrap();
-        if let Err(err) = Self::start_negentropy_sync(syncref.clone(), sync.stop_signal.clone()) {
-            error!("trouble in start_negentropy_sync: {:?}", err);
-        }
+        let mut sync = syncref.lock().unwrap();
+        sync.is_link_ready = true;
     }
 
-    fn start_negentropy_sync(syncref: SyncRef, stop_signal: Arc<Notify>) -> SyncResult<()> {
-        task::spawn(async move {
-            debug!("negentropy sync starting");
-            let mut interval = time::interval(Duration::from_secs(SYNC_NEGENTROPY_INITIATE_SECS));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        let mut sync = syncref.lock().unwrap();
-                        match sync.negentropy.initiate() {
-                            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
-                            Ok(negbytes) =>
-                                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
-                                    error!("trouble queueing negentropy message: {:?}", err);
-                                },
-                        }
-                    }
-                    _ = stop_signal.notified() => {
-                        break;
-                    }
+    // called when a LinkInfo packet is received
+    fn link_info(syncref: SyncRef, info: LinkInfo) {
+        let mut sync = syncref.lock().unwrap();
+        debug!(
+            "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
+            &info,
+            sync.last_sync_recv.elapsed().as_secs(),
+            sync.last_note_recv.elapsed().as_secs(),
+        );
+
+        // This routine should decide when to initiate negentropy messages
+
+        if !sync.is_link_ready {
+            info!("link is not ready, skip negentropy initiate");
+            return;
+        }
+
+        if sync.last_note_recv.elapsed().as_secs() < SYNC_NOTE_IDLE_SECS {
+            info!("currently receiving notes, skip negentropy initiate");
+            return;
+        }
+
+        if sync.last_sync_recv.elapsed().as_secs() < SYNC_RECONCILE_IDLE_SECS {
+            info!("currently reconciling, skip negentropy initiate");
+            return;
+        }
+
+        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_QUEUE_THRESH {
+            info!("outgoing queues not empty, skip negentropy initiate");
+            return;
+        }
+
+        // if we make it here initiate a negentropy exchange
+        match sync.negentropy.initiate() {
+            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
+            Ok(negbytes) => {
+                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
+                    error!("trouble queueing negentropy message: {:?}", err);
                 }
             }
-            debug!("negentropy sync stopping");
-        });
-
-        Ok(())
+        }
     }
 
     fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
@@ -197,17 +215,6 @@ impl Sync {
                 info!("sync message handler finished");
             }
         });
-    }
-
-    // called when a LinkInfo packet is received
-    fn link_info(syncref: SyncRef, info: LinkInfo) {
-        let sync = syncref.lock().unwrap();
-        debug!(
-            "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
-            &info,
-            sync.last_sync_recv.elapsed().as_secs(),
-            sync.last_note_recv.elapsed().as_secs(),
-        );
     }
 
     fn handle_sync_message(syncref: SyncRef, msgid: MsgId, message: SyncMessage) {
