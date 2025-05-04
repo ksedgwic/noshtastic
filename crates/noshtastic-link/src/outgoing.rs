@@ -20,6 +20,7 @@ use tokio::{
 use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
 const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
+const LINK_OUTGOING_QUEUE_MAX: usize = 100;
 
 #[derive(Debug)]
 struct Queues {
@@ -80,18 +81,26 @@ impl Outgoing {
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
-        let outcome = match options.action {
-            Action::Drop => {
-                if !queue.iter().any(|(id, _)| *id == msgid) {
-                    queue.push_back((msgid, frame)); // Enqueue only if no match
-                    Action::Queue
-                } else {
-                    Action::Drop
+        let outcome = if queue.len() > LINK_OUTGOING_QUEUE_MAX {
+            Action::Limit
+        } else {
+            match options.action {
+                Action::Drop => {
+                    if !queue.iter().any(|(id, _)| *id == msgid) {
+                        queue.push_back((msgid, frame)); // Enqueue only if no match
+                        Action::Queue
+                    } else {
+                        Action::Drop
+                    }
                 }
-            }
-            Action::Queue => {
-                queue.push_back((msgid, frame)); // Always enqueue
-                Action::Queue
+                Action::Queue => {
+                    queue.push_back((msgid, frame)); // Always enqueue
+                    Action::Queue
+                }
+                Action::Limit => {
+                    error!("shouldn't see option.action set to Limit");
+                    Action::Limit
+                }
             }
         };
         if need_wakeup {

@@ -46,10 +46,12 @@ pub enum Priority {
     High,
 }
 
+// The Action enum is used both as an input option value and as a return value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Drop,  // drop this msg if a match is already queued
     Queue, // ignore matches, just queue
+    Limit, // the queue is full, message dropped (only used as return value)
 }
 
 impl fmt::Display for Action {
@@ -57,6 +59,7 @@ impl fmt::Display for Action {
         let description = match self {
             Action::Drop => "Drop",
             Action::Queue => "Queue",
+            Action::Limit => "Limit",
         };
         write!(f, "{}", description)
     }
