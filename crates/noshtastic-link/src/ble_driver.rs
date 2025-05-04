@@ -34,7 +34,7 @@ pub(crate) async fn create_ble_stream(
     PacketReceiver,
     ConnectedStreamApi<meshtastic::api::state::Connected>,
 )> {
-    debug!("build_ble_stream starting, hint {:?}", maybe_hint);
+    info!("build_ble_stream starting, hint {:?}", maybe_hint);
     if maybe_hint.is_none() {
         return Err(LinkError::internal_error(
             "need a BLE device hint".to_string(),
@@ -46,7 +46,7 @@ pub(crate) async fn create_ble_stream(
 
     let stream_api = StreamApi::new();
     let (mesh_in_rx, stream_api) = stream_api.connect(ble_stream).await;
-    debug!("ble_stream connected");
+    info!("ble_stream connected");
 
     Ok((mesh_in_rx, stream_api))
 }

@@ -80,7 +80,7 @@ impl Sync {
     // called when a LinkInfo packet is received
     fn link_info(syncref: SyncRef, info: LinkInfo) {
         let mut sync = syncref.lock().unwrap();
-        debug!(
+        info!(
             "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
             &info,
             sync.last_sync_recv.elapsed().as_secs(),
@@ -186,7 +186,7 @@ impl Sync {
         stop_signal: Arc<Notify>,
     ) {
         tokio::spawn(async move {
-            info!("sync message handler starting");
+            debug!("sync message handler starting");
             loop {
                 tokio::select! {
                     Some(msg) = receiver.recv() => {
@@ -212,7 +212,7 @@ impl Sync {
                         break;
                     },
                 }
-                info!("sync message handler finished");
+                debug!("sync message handler finished");
             }
         });
     }
@@ -258,8 +258,8 @@ impl Sync {
                         }
                     }
                 }
-                debug!("have: {:?}", DebugVecId(have_ids.clone()));
-                debug!("need: {:?}", DebugVecId(need_ids.clone()));
+                info!("have: {:?}", DebugVecId(have_ids.clone()));
+                info!("need: {:?}", DebugVecId(need_ids.clone()));
                 if let Err(err) = sync.send_needed_notes(have_ids) {
                     error!("send needed notes failed: {:?}", err);
                 }
@@ -272,7 +272,7 @@ impl Sync {
 
     fn handle_raw_note(&mut self, msgid: MsgId, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
-            debug!("saw RawNote {}: {}", msgid, utf8_str);
+            info!("saw RawNote {}: {}", msgid, utf8_str);
             if let Err(err) = self
                 .ndb
                 .process_event_with(utf8_str, IngestMetadata::new().client(true))
@@ -284,13 +284,13 @@ impl Sync {
             }
             self.recently_inserted.insert(msgid);
         } else {
-            debug!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
+            warn!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
         }
     }
 
     fn handle_enc_note(&mut self, msgid: MsgId, enc_note: EncNote) {
         let utf8_str = enc_note.to_string();
-        debug!("saw EncNote {}: {}", msgid, utf8_str);
+        info!("saw EncNote {}: {}", msgid, utf8_str);
         if let Err(err) = self
             .ndb
             .process_event_with(&utf8_str, IngestMetadata::new().client(true))

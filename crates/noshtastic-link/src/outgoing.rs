@@ -158,7 +158,7 @@ impl Outgoing {
                         {
                             let mut link = linkref.lock().await;
 
-                            debug!(
+                            info!(
                                 "qlens: {:?}: sending LinkFrame {}, sz: {}",
                                 qlens,
                                 msgid,
