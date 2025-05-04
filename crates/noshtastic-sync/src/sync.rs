@@ -417,13 +417,7 @@ impl Sync {
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        let priority = if is_initial {
-            // defer initial messages if we are busy
-            Priority::Low
-        } else {
-            // send response messages promptly
-            Priority::High
-        };
+        let priority = Priority::High;
         let msgid = MsgId::from(data);
         self.queue_outgoing_message(
             msgid,
