@@ -15,11 +15,12 @@ use std::{
 use tokio::{
     sync::{mpsc, Notify},
     task,
-    time::{self, sleep, Duration},
+    time::{self, sleep, Duration, Instant},
 };
 
 use noshtastic_link::{
-    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId, Priority,
+    self, Action, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
+    Priority,
 };
 
 use crate::{
@@ -27,16 +28,21 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
-const SYNC_NEGENTROPY_INITIATE_SECS: u64 = 2 * 60;
+const SYNC_NOTE_IDLE_SECS: u64 = 120;
+const SYNC_RECONCILE_IDLE_SECS: u64 = 60;
+const SYNC_OUTGOING_QUEUE_THRESH: usize = 4;
 
 pub struct Sync {
-    stop_signal: Arc<Notify>,
+    _stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::Sender<LinkMessage>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
     recently_inserted: LruSet<MsgId>,
     negentropy: NegentropyState,
+    is_link_ready: bool,
+    last_sync_recv: Instant,
+    last_note_recv: Instant,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -47,14 +53,18 @@ impl Sync {
         link_rx: mpsc::Receiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
+        let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
         let syncref = Arc::new(Mutex::new(Sync {
-            stop_signal: stop_signal.clone(),
+            _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
             negentropy: NegentropyState::new(ndb.clone()),
+            is_link_ready: false,
+            last_sync_recv: long_ago,
+            last_note_recv: long_ago,
         }));
         Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
         Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
@@ -63,37 +73,51 @@ impl Sync {
 
     // called when the link is ready
     fn link_ready(syncref: SyncRef) {
-        let sync = syncref.lock().unwrap();
-        if let Err(err) = Self::start_negentropy_sync(syncref.clone(), sync.stop_signal.clone()) {
-            error!("trouble in start_negentropy_sync: {:?}", err);
-        }
+        let mut sync = syncref.lock().unwrap();
+        sync.is_link_ready = true;
     }
 
-    fn start_negentropy_sync(syncref: SyncRef, stop_signal: Arc<Notify>) -> SyncResult<()> {
-        task::spawn(async move {
-            debug!("negentropy sync starting");
-            let mut interval = time::interval(Duration::from_secs(SYNC_NEGENTROPY_INITIATE_SECS));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        let mut sync = syncref.lock().unwrap();
-                        match sync.negentropy.initiate() {
-                            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
-                            Ok(negbytes) =>
-                                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
-                                    error!("trouble queueing negentropy message: {:?}", err);
-                                },
-                        }
-                    }
-                    _ = stop_signal.notified() => {
-                        break;
-                    }
+    // called when a LinkInfo packet is received
+    fn link_info(syncref: SyncRef, info: LinkInfo) {
+        let mut sync = syncref.lock().unwrap();
+        debug!(
+            "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
+            &info,
+            sync.last_sync_recv.elapsed().as_secs(),
+            sync.last_note_recv.elapsed().as_secs(),
+        );
+
+        // This routine should decide when to initiate negentropy messages
+
+        if !sync.is_link_ready {
+            info!("link is not ready, skip negentropy initiate");
+            return;
+        }
+
+        if sync.last_note_recv.elapsed().as_secs() < SYNC_NOTE_IDLE_SECS {
+            info!("currently receiving notes, skip negentropy initiate");
+            return;
+        }
+
+        if sync.last_sync_recv.elapsed().as_secs() < SYNC_RECONCILE_IDLE_SECS {
+            info!("currently reconciling, skip negentropy initiate");
+            return;
+        }
+
+        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_QUEUE_THRESH {
+            info!("outgoing queues not empty, skip negentropy initiate");
+            return;
+        }
+
+        // if we make it here initiate a negentropy exchange
+        match sync.negentropy.initiate() {
+            Err(err) => error!("trouble in negentropy initiate: {:?}", err),
+            Ok(negbytes) => {
+                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
+                    error!("trouble queueing negentropy message: {:?}", err);
                 }
             }
-            debug!("negentropy sync stopping");
-        });
-
-        Ok(())
+        }
     }
 
     fn start_local_subscription(syncref: SyncRef, _stop_signal: Arc<Notify>) -> SyncResult<()> {
@@ -170,6 +194,9 @@ impl Sync {
                             LinkMessage::Ready => {
                                 Self::link_ready(syncref.clone());
                             },
+                            LinkMessage::Info(info) => {
+                                Self::link_info(syncref.clone(), info);
+                            },
                             LinkMessage::Payload(payload) => {
                                 match SyncMessage::decode(&payload.data[..]) {
                                     Ok(decoded) => {
@@ -206,14 +233,17 @@ impl Sync {
             }
             Some(Payload::RawNote(raw_note)) => {
                 info!("received RawNote {} sz: {}", msgid, raw_note.data.len());
+                sync.last_note_recv = Instant::now();
                 sync.handle_raw_note(msgid, raw_note);
             }
             Some(Payload::EncNote(enc_note)) => {
                 info!("received EncNote {}", msgid);
+                sync.last_note_recv = Instant::now();
                 sync.handle_enc_note(msgid, enc_note);
             }
             Some(Payload::Negentropy(negmsg)) => {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
+                sync.last_sync_recv = Instant::now();
                 let mut have_ids = vec![];
                 let mut need_ids = vec![];
                 match sync
@@ -379,16 +409,6 @@ impl Sync {
             LinkOptionsBuilder::new().priority(priority).build(),
         )
     }
-
-    // fn send_raw_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
-    //     info!("queueing RawNote {} sz: {}", msgid, note_json.len());
-    //     let raw_note = Payload::RawNote(RawNote {
-    //         data: note_json.as_bytes().to_vec(),
-    //     });
-    //     self.queue_outgoing_message(
-    //         msgid, Some(raw_note), LinkOptionsBuilder::new().action(Action::Drop).build()
-    //     )
-    // }
 
     fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
         info!("queueing EncNote {} sz: {}", msgid, note_json.len());

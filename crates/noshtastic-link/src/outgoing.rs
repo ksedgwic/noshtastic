@@ -19,7 +19,7 @@ use tokio::{
 
 use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
 
-const LINK_TX_RATE_LIMIT_SECS: u64 = 2;
+const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
 
 #[derive(Debug)]
 struct Queues {
@@ -60,6 +60,11 @@ impl Outgoing {
             queuesref,
             notify: None,
         }
+    }
+
+    pub(crate) async fn qlen(&self) -> [usize; 3] {
+        let queues = self.queuesref.lock().await;
+        [queues.high.len(), queues.normal.len(), queues.low.len()]
     }
 
     pub(crate) async fn enqueue(

@@ -10,6 +10,8 @@ use std::io::Write;
 
 use crate::SyncResult;
 
+const SYNC_NEGENTROPY_FRAME_SIZE_LIMIT: u64 = 500;
+
 pub(crate) struct NegentropyState {
     ndb: Ndb,
 }
@@ -41,7 +43,7 @@ impl NegentropyState {
             }
         }
         storage.seal()?;
-        Ok(Negentropy::new(storage, 200)?)
+        Ok(Negentropy::new(storage, SYNC_NEGENTROPY_FRAME_SIZE_LIMIT)?)
     }
 
     pub(crate) fn initiate(&mut self) -> SyncResult<Vec<u8>> {
