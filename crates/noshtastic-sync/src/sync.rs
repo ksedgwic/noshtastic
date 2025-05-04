@@ -15,11 +15,12 @@ use std::{
 use tokio::{
     sync::{mpsc, Notify},
     task,
-    time::{self, sleep, Duration},
+    time::{self, sleep, Duration, Instant},
 };
 
 use noshtastic_link::{
-    self, Action, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId, Priority,
+    self, Action, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
+    Priority,
 };
 
 use crate::{
@@ -37,6 +38,8 @@ pub struct Sync {
     max_notes: u32,
     recently_inserted: LruSet<MsgId>,
     negentropy: NegentropyState,
+    last_sync_recv: Instant,
+    last_note_recv: Instant,
 }
 pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
@@ -47,6 +50,7 @@ impl Sync {
         link_rx: mpsc::Receiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
+        let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
         let syncref = Arc::new(Mutex::new(Sync {
             stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
@@ -55,6 +59,8 @@ impl Sync {
             max_notes: 100,
             recently_inserted: LruSet::new(20),
             negentropy: NegentropyState::new(ndb.clone()),
+            last_sync_recv: long_ago,
+            last_note_recv: long_ago,
         }));
         Self::start_message_handler(syncref.clone(), link_rx, stop_signal.clone());
         Self::start_local_subscription(syncref.clone(), stop_signal.clone())?;
@@ -171,7 +177,7 @@ impl Sync {
                                 Self::link_ready(syncref.clone());
                             },
                             LinkMessage::Info(info) => {
-                                debug!("saw LinkMessage::Info: {:?}", &info);
+                                Self::link_info(syncref.clone(), info);
                             },
                             LinkMessage::Payload(payload) => {
                                 match SyncMessage::decode(&payload.data[..]) {
@@ -193,6 +199,17 @@ impl Sync {
         });
     }
 
+    // called when a LinkInfo packet is received
+    fn link_info(syncref: SyncRef, info: LinkInfo) {
+        let sync = syncref.lock().unwrap();
+        debug!(
+            "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
+            &info,
+            sync.last_sync_recv.elapsed().as_secs(),
+            sync.last_note_recv.elapsed().as_secs(),
+        );
+    }
+
     fn handle_sync_message(syncref: SyncRef, msgid: MsgId, message: SyncMessage) {
         let mut sync = syncref.lock().unwrap();
         match message.payload {
@@ -209,14 +226,17 @@ impl Sync {
             }
             Some(Payload::RawNote(raw_note)) => {
                 info!("received RawNote {} sz: {}", msgid, raw_note.data.len());
+                sync.last_note_recv = Instant::now();
                 sync.handle_raw_note(msgid, raw_note);
             }
             Some(Payload::EncNote(enc_note)) => {
                 info!("received EncNote {}", msgid);
+                sync.last_note_recv = Instant::now();
                 sync.handle_enc_note(msgid, enc_note);
             }
             Some(Payload::Negentropy(negmsg)) => {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
+                sync.last_sync_recv = Instant::now();
                 let mut have_ids = vec![];
                 let mut need_ids = vec![];
                 match sync
