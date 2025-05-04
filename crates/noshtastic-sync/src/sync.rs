@@ -170,6 +170,9 @@ impl Sync {
                             LinkMessage::Ready => {
                                 Self::link_ready(syncref.clone());
                             },
+                            LinkMessage::Info(info) => {
+                                debug!("saw LinkMessage::Info: {:?}", &info);
+                            },
                             LinkMessage::Payload(payload) => {
                                 match SyncMessage::decode(&payload.data[..]) {
                                     Ok(decoded) => {

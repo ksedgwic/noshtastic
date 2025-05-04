@@ -22,8 +22,8 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkFrag, LinkFrame, LinkMessage,
-    LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
+    outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkFrag, LinkFrame, LinkInfo,
+    LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -31,6 +31,7 @@ const LINK_MAGIC: u32 = 0x48534F4E; // 'NOSH'
 const LINK_FRAG_THRESH: usize = 200;
 const LINK_STALE_SECS: i64 = 300; // messages older than this are considered stale
 const LINK_READY_HOLDOFF_SECS: u64 = 5; // wait this long after settled
+const LINK_INFO_SECS: u64 = 60; // send link info periodically
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
@@ -92,6 +93,9 @@ impl Link {
         // Check for link ready
         Link::start_check_ready(linkref.clone(), stop_signal.clone())?;
 
+        // Report LinkInfo (this initiates negentropy sync when appropriate)
+        Link::start_link_info(linkref.clone(), stop_signal.clone())?;
+
         Ok(())
     }
 
@@ -148,6 +152,30 @@ impl Link {
                     _ = interval.tick() => {
                         if Self::maybe_declare_ready(linkref.clone()).await {
                             break;
+                        }
+                    }
+                }
+            }
+            info!("check_ready finished");
+        });
+        Ok(())
+    }
+
+    fn start_link_info(linkref: LinkRef, stop_signal: Arc<Notify>) -> LinkResult<()> {
+        let mut interval = time::interval(Duration::from_secs(LINK_INFO_SECS));
+        task::spawn(async move {
+            info!("check_ready starting");
+            loop {
+                tokio::select! {
+                    _ = stop_signal.notified() => {
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        let link = linkref.lock().await;
+                        let qlen = link.outgoing.qlen().await;
+                        let info = LinkInfo { qlen };
+                        if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)).await {
+                            error!("send link info: failed to send message: {}", err);
                         }
                     }
                 }

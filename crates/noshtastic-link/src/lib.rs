@@ -95,6 +95,11 @@ impl LinkOptionsBuilder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkInfo {
+    pub qlen: [usize; 3], // lengths [high, normal, low]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkPayload {
     pub msgid: MsgId,
     pub options: LinkOptions,
@@ -111,6 +116,8 @@ impl LinkPayload {
 pub enum LinkMessage {
     // link is ready, sent upstream to client
     Ready,
+    // periodic link information
+    Info(LinkInfo),
     // link data payload, used in both directions
     Payload(LinkPayload),
 }

@@ -62,6 +62,11 @@ impl Outgoing {
         }
     }
 
+    pub(crate) async fn qlen(&self) -> [usize; 3] {
+        let queues = self.queuesref.lock().await;
+        [queues.high.len(), queues.normal.len(), queues.low.len()]
+    }
+
     pub(crate) async fn enqueue(
         &mut self,
         msgid: MsgId,
