@@ -268,7 +268,7 @@ impl Link {
                 .as_secs() as i64;
             let age = now - mesh_packet.rx_time as i64;
             if age > LINK_STALE_SECS {
-                debug!("skipping stale message: {} secs old", age);
+                info!("skipping stale message: {} secs old", age);
                 Self::postpone_ready(linkref).await;
                 return;
             }
@@ -307,7 +307,7 @@ impl Link {
     // Handle unfragmented messages
     async fn handle_complete(linkref: &LinkRef, linkmsg: LinkMsg) {
         let msgid = MsgId::new(linkmsg.msgid, None);
-        debug!(
+        info!(
             "received complete LinkMsg {} w/ payload sz: {}",
             msgid,
             linkmsg.data.len()
@@ -339,7 +339,7 @@ impl Link {
     // Handle fragmented messages
     async fn handle_fragment(linkref: &LinkRef, frag: LinkFrag) {
         let msgid = MsgId::new(frag.msgid, Some(frag.fragndx));
-        debug!(
+        info!(
             "received LinkFrag {}/{}, rotoff: {}, payload sz: {}",
             msgid,
             frag.numfrag,
@@ -367,7 +367,7 @@ impl Link {
 
         // add the fragment and if completed send the message to the client
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
-            debug!("completed LinkFrag {}", msgid);
+            info!("completed LinkFrag {}", msgid);
             if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
                 error!("failed to send message: {}", err);
             }
@@ -377,7 +377,7 @@ impl Link {
     // Handle requests for missing fragments
     async fn handle_missing(linkref: &LinkRef, missing: LinkMissing) {
         let msgid = MsgId::new(missing.msgid, None);
-        debug!("received LinkMissing {}: {:?}", msgid, missing.fragndx);
+        info!("received LinkMissing {}: {:?}", msgid, missing.fragndx);
         let mut link = linkref.lock().await;
         for frag in link.fragcache.fulfill_missing(missing) {
             let fragndx = frag.fragndx;
@@ -398,7 +398,7 @@ impl Link {
                     LinkOptionsBuilder::new().priority(Priority::High).build(),
                 )
                 .await;
-            debug!(
+            info!(
                 "requeueing LinkFrag {}/{}, rotoff: {}, payload sz: {} => {}",
                 msgid, numfrag, rotoff, fraglen, outcome
             );
@@ -455,7 +455,7 @@ impl Link {
             .outgoing
             .enqueue(payload.msgid, link_frame, payload.options)
             .await;
-        debug!(
+        info!(
             "queueing complete LinkMsg {} w/ payload sz: {} => {}",
             payload.msgid,
             payload.data.len(),
@@ -493,7 +493,7 @@ impl Link {
                 .outgoing
                 .enqueue(msgid, link_frame, payload.options.clone())
                 .await;
-            debug!(
+            info!(
                 "queueing LinkFrag {}/{} payload sz: {} => {}",
                 msgid,
                 numfrag,

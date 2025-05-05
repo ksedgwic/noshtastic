@@ -46,10 +46,12 @@ pub enum Priority {
     High,
 }
 
+// The Action enum is used both as an input option value and as a return value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Drop,  // drop this msg if a match is already queued
     Queue, // ignore matches, just queue
+    Limit, // the queue is full, message dropped (only used as return value)
 }
 
 impl fmt::Display for Action {
@@ -57,6 +59,7 @@ impl fmt::Display for Action {
         let description = match self {
             Action::Drop => "Drop",
             Action::Queue => "Queue",
+            Action::Limit => "Limit",
         };
         write!(f, "{}", description)
     }
@@ -150,7 +153,7 @@ pub async fn create_link(
     mpsc::Sender<LinkMessage>,
     mpsc::Receiver<LinkMessage>,
 )> {
-    debug!("create_link starting");
+    debug!("info_link starting");
 
     // create a stream to the radio
     let (mut mesh_in_rx, connected_stream_api) = if cfg!(target_os = "android") {
@@ -186,7 +189,7 @@ pub async fn create_link(
     // start assoiated tasks
     Link::start(&linkref, mesh_in_rx, client_in_rx, stop_signal.clone()).await?;
 
-    debug!("create_link finished");
+    info!("create_link finished");
     Ok((linkref, client_in_tx, client_out_rx))
 }
 
@@ -210,11 +213,11 @@ pub async fn wait_for_config_complete(
                     }
                 }
                 PayloadVariant::MyInfo(myinfo) => {
-                    log::info!("Saw MyNodeInfo => device ID: {}", myinfo.my_node_num,);
+                    log::debug!("saw MyNodeInfo => device ID: {}", myinfo.my_node_num,);
                 }
                 PayloadVariant::NodeInfo(nodeinfo) => {
                     log::info!(
-                        "Saw NodeInfo => node num: {}, user: {:?}",
+                        "saw NodeInfo => node num: {}, user: {:?}",
                         nodeinfo.num,
                         nodeinfo.user
                     );
@@ -224,16 +227,16 @@ pub async fn wait_for_config_complete(
                 }
                 PayloadVariant::Channel(ch) => {
                     log::info!(
-                        "Saw Channel => index: {}, settings: {:?}",
+                        "saw Channel => index: {}, settings: {:?}",
                         ch.index,
                         ch.settings
                     );
                 }
                 PayloadVariant::ModuleConfig(mod_cfg) => {
-                    log::info!("Saw ModuleConfig => partial config: {:?}", mod_cfg);
+                    log::info!("saw ModuleConfig => partial config: {:?}", mod_cfg);
                 }
                 other => {
-                    log::debug!("Saw: {:?}", other);
+                    log::info!("saw: {:?}", other);
                 }
             }
         } else {

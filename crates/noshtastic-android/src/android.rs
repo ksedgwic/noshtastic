@@ -170,7 +170,7 @@ impl DualLogger {
         // what should we log to the GUI?
         const GUI_SPEC: &str = concat!(
             // Default logging level
-            "debug",
+            "info",
             // Quieting down noisy dependencies
             ",wgpu_hal=error",
             ",wgpu_core=error",
