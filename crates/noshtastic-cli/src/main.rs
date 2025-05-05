@@ -118,6 +118,7 @@ fn init_nostrdb(data_dir: &str) -> Result<Ndb> {
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logger();
+
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .unwrap();
@@ -134,6 +135,9 @@ async fn main() -> Result<()> {
         sleep(Duration::from_secs(5)).await;
         Sync::start_pinging(syncref.clone(), Duration::from_secs(30))?;
     }
+
+    // Start localhost nostr relay
+    let _relay = noshtastic_relay::start_localhost_relay(ndb).await?;
 
     // wait for termination signal
     info!("waiting for ^C to terminate ...");

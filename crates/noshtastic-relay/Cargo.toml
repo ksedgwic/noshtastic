@@ -1,0 +1,16 @@
+[package]
+name = "noshtastic-relay"
+description = "A localhost nostr relay which exposes the noshtastic database."
+version = { workspace = true }
+authors = ["Ken Sedgwick <ken@bonsai.com>"]
+edition = "2021"
+
+[dependencies]
+# common dependencies
+nostr-relay-builder = { workspace = true }
+nostrdb = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+# unique dependencies
+nostr-ndb = "0.41"

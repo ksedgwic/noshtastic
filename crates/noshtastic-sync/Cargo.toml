@@ -12,6 +12,7 @@ noshtastic-link = { workspace = true }
 # common dependencies
 hex = { workspace = true }
 log = { workspace = true }
+nostr = { workspace = true }
 nostrdb = { workspace = true }
 prost = { workspace = true }
 serde_json = { workspace = true }
@@ -22,7 +23,6 @@ tokio = { workspace = true }
 brotli = "7.0"
 futures = "0.3"
 negentropy = { git = "https://github.com/ksedgwic/rust-negentropy.git", rev = "ec19dbb4947fa7b0fbf900405a92bde504598ed1", features = ["tiny-frame"] }
-nostr = "0.41"
 rand = "0.8"
 secp256k1 = "0.29"
 

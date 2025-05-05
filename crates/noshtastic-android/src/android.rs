@@ -13,6 +13,7 @@ use jni::{
     JNIEnv, JavaVM,
 };
 use log::*;
+use nostr_relay_builder::local::LocalRelay;
 use nostrdb::{Config, Ndb};
 use once_cell::sync::{Lazy, OnceCell};
 use std::{
@@ -37,6 +38,7 @@ pub static GLOBAL_STATE: Lazy<Mutex<AppState>> = Lazy::new(|| Mutex::new(AppStat
 pub struct AppState {
     pub link: Option<LinkRef>,
     pub sync: Option<SyncRef>,
+    pub relay: Option<LocalRelay>,
 }
 
 impl AppState {
@@ -44,6 +46,7 @@ impl AppState {
         Self {
             link: None,
             sync: None,
+            relay: None,
         }
     }
 }
@@ -197,7 +200,7 @@ impl DualLogger {
 }
 
 impl log::Log for DualLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
         true
     }
 
@@ -368,12 +371,14 @@ async fn setup_noshtastic(radio_name: &str) -> Result<()> {
             .context("create_link failed")?;
 
     let ndb = init_nostrdb().context("init_nostrdb failed")?;
-    let syncref = Sync::new(ndb, link_tx, link_rx, stop_signal).context("Sync::new failed")?;
-
+    let syncref =
+        Sync::new(ndb.clone(), link_tx, link_rx, stop_signal).context("Sync::new failed")?;
+    let relay = noshtastic_relay::start_localhost_relay(ndb.clone()).await?;
     {
         let mut state = GLOBAL_STATE.lock().unwrap();
         state.link = Some(linkref);
         state.sync = Some(syncref);
+        state.relay = Some(relay);
     }
     Ok(())
 }
