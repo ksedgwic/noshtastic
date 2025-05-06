@@ -152,14 +152,11 @@ impl Sync {
                 match sub.next().await {
                     Some(notekeys) => {
                         info!("saw notekeys: {:?}", notekeys);
-                        // TEMPORARY - for now don't immediately send new notes
-                        if false {
-                            let sync = syncref_clone.lock().unwrap();
-                            for notekey in notekeys {
-                                if let Err(err) = sync.relay_notekey(notekey) {
-                                    error!("Error in relay_note: {:?}", err);
-                                    // keep going for now
-                                }
+                        let sync = syncref_clone.lock().unwrap();
+                        for notekey in notekeys {
+                            if let Err(err) = sync.relay_notekey(notekey) {
+                                error!("Error in relay_note: {:?}", err);
+                                // keep going for now
                             }
                         }
                     }

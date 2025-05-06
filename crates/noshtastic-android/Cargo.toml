@@ -9,10 +9,12 @@ edition = "2021"
 # local dependencies
 noshtastic-link = { workspace = true }
 noshtastic-sync = { workspace = true }
+noshtastic-relay = { workspace = true }
 
 # common dependencies
 anyhow = { workspace = true }
 chrono = { workspace = true }
+nostr-relay-builder = { workspace = true }
 nostrdb = { workspace = true }
 tokio = { workspace = true }
 

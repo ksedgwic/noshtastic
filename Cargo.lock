@@ -1495,7 +1495,7 @@ dependencies = [
 [[package]]
 name = "meshtastic"
 version = "0.1.6"
-source = "git+https://github.com/ksedgwic/meshtastic-rust?rev=77b35cb6243ee17db2f78652934cfad3e52f9be7#77b35cb6243ee17db2f78652934cfad3e52f9be7"
+source = "git+https://github.com/ksedgwic/meshtastic-rust?rev=e7351477df915ba285e3bfeb7b135553066e9062#e7351477df915ba285e3bfeb7b135553066e9062"
 dependencies = [
  "btleplug",
  "futures",
@@ -1623,7 +1623,9 @@ dependencies = [
  "libc",
  "log",
  "noshtastic-link",
+ "noshtastic-relay",
  "noshtastic-sync",
+ "nostr-relay-builder",
  "nostrdb",
  "once_cell",
  "tokio",
@@ -1640,6 +1642,7 @@ dependencies = [
  "env_logger",
  "log",
  "noshtastic-link",
+ "noshtastic-relay",
  "noshtastic-sync",
  "noshtastic-testgw",
  "nostrdb",
@@ -1661,6 +1664,17 @@ dependencies = [
  "tokio",
  "tokio-serial",
  "tonic-build",
+]
+
+[[package]]
+name = "noshtastic-relay"
+version = "0.1.0"
+dependencies = [
+ "nostr-ndb",
+ "nostr-relay-builder",
+ "nostrdb",
+ "thiserror 2.0.12",
+ "tokio",
 ]
 
 [[package]]
@@ -1733,6 +1747,33 @@ dependencies = [
  "lru",
  "nostr",
  "tokio",
+]
+
+[[package]]
+name = "nostr-ndb"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd635b914b167437cb1f3b20fd256068f2fc9d622d9e05dfd13f0b097e81b609"
+dependencies = [
+ "nostr",
+ "nostr-database",
+ "nostrdb",
+]
+
+[[package]]
+name = "nostr-relay-builder"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7846558d9aadaf2e6ec1f8d12dd94a7e8c61d9cb799b80b3c2affc7f1e214dc6"
+dependencies = [
+ "async-utility",
+ "async-wsocket",
+ "atomic-destructor",
+ "negentropy 0.5.0",
+ "nostr",
+ "nostr-database",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

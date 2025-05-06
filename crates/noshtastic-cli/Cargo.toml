@@ -10,6 +10,7 @@ edition = "2021"
 noshtastic-link = { workspace = true }
 noshtastic-sync = { workspace = true }
 noshtastic-testgw = { workspace = true }
+noshtastic-relay = { workspace = true }
 
 # common dependencies
 anyhow = { workspace = true }
