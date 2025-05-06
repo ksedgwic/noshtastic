@@ -18,7 +18,7 @@ sha2 = "0.10"
 tokio-serial = "5.4"
 
 # need BLE, use custom branch w/ prospective PRs
-meshtastic =  { git = "https://github.com/ksedgwic/meshtastic-rust", rev = "80400e37964d8f8736030f554f20d602473b8a51", features = ["bluetooth-le"] }
+meshtastic =  { git = "https://github.com/ksedgwic/meshtastic-rust", rev = "e7351477df915ba285e3bfeb7b135553066e9062", features = ["bluetooth-le"] }
 #meshtastic = { path = "../../../meshtastic-rust", features = ["bluetooth-le"] }
 
 [build-dependencies]
