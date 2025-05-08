@@ -176,6 +176,7 @@ pub async fn create_link(
     // |        rx | <------------ | tx      rx | <----------- | tx         |
     // +-----------+               +------------+              +------------+
 
+    // FIXME - change these to unbounded
     let (client_in_tx, client_in_rx) = mpsc::channel::<LinkMessage>(100);
     let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
 

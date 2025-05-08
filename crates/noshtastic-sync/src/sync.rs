@@ -12,6 +12,7 @@ use std::{
     fmt,
     sync::{Arc, Mutex},
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::{
     sync::{mpsc, Notify},
     task,
@@ -37,6 +38,7 @@ pub struct Sync {
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::Sender<LinkMessage>,
+    incoming_tx: mpsc::UnboundedSender<String>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
     recently_inserted: LruSet<MsgId>,
@@ -53,6 +55,7 @@ impl Sync {
         ndb: Ndb,
         link_tx: mpsc::Sender<LinkMessage>,
         link_rx: mpsc::Receiver<LinkMessage>,
+        incoming_tx: UnboundedSender<String>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
@@ -60,6 +63,7 @@ impl Sync {
             _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
+            incoming_tx,
             ping_duration: None,
             max_notes: 100,
             recently_inserted: LruSet::new(20),
@@ -292,6 +296,8 @@ impl Sync {
     fn handle_raw_note(&mut self, msgid: MsgId, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
             info!("saw RawNote {}: {}", msgid, utf8_str);
+
+            // first, store it in the db
             if let Err(err) = self
                 .ndb
                 .process_event_with(utf8_str, IngestMetadata::new().client(true))
@@ -301,6 +307,10 @@ impl Sync {
                     &utf8_str, err
                 );
             }
+
+            // then send it directly to the relay
+            self.incoming_tx.send(utf8_str.to_string()).ok();
+
             self.recently_inserted.insert(msgid);
         } else {
             warn!("saw RawNote: [Invalid UTF-8 data: {:x?}]", raw_note.data);
@@ -310,6 +320,8 @@ impl Sync {
     fn handle_enc_note(&mut self, msgid: MsgId, enc_note: EncNote) {
         let utf8_str = enc_note.to_string();
         info!("saw EncNote {}: {}", msgid, utf8_str);
+
+        // first, store it in the db
         if let Err(err) = self
             .ndb
             .process_event_with(&utf8_str, IngestMetadata::new().client(true))
@@ -319,6 +331,10 @@ impl Sync {
                 &utf8_str, err
             );
         }
+
+        // then send it directly to the relay
+        self.incoming_tx.send(utf8_str).ok();
+
         self.recently_inserted.insert(msgid);
     }
 
