@@ -19,6 +19,7 @@ env_logger = { workspace = true }
 log = { workspace = true }
 nostrdb = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 # unique dependencies
 clap = { version = "4.5", features = ["derive"] }

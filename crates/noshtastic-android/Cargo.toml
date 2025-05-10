@@ -17,6 +17,7 @@ chrono = { workspace = true }
 nostr-relay-builder = { workspace = true }
 nostrdb = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 # unique dependencies
 android_logger = "0.15"

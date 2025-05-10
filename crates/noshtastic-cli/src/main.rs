@@ -13,7 +13,7 @@ use nostrdb::{Config, Ndb};
 use std::{env, io::Write, path::Path, sync::Arc};
 use tokio::{
     signal,
-    sync::Notify,
+    sync::{mpsc, Notify},
     time::{sleep, Duration},
 };
 
@@ -127,7 +127,19 @@ async fn main() -> Result<()> {
     let ndb = init_nostrdb(&args.data_dir)?;
     let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
     let (_linkref, link_tx, link_rx) = create_link(&args.serial, stop_signal.clone()).await?;
-    let syncref = Sync::new(ndb.clone(), link_tx, link_rx, stop_signal.clone())?;
+
+    // The relay doesn't see events when they arrive via the mesh and
+    // are inserted in the database directly, use this channel to send
+    // them directly to the relay.
+    let (incoming_event_tx, incoming_event_rx) = mpsc::unbounded_channel::<String>();
+
+    let syncref = Sync::new(
+        ndb.clone(),
+        link_tx,
+        link_rx,
+        incoming_event_tx,
+        stop_signal.clone(),
+    )?;
 
     testgw.start().await?;
     if args.enable_ping {
@@ -137,7 +149,7 @@ async fn main() -> Result<()> {
     }
 
     // Start localhost nostr relay
-    let _relay = noshtastic_relay::start_localhost_relay(ndb).await?;
+    let _relay = noshtastic_relay::start_localhost_relay(ndb, incoming_event_rx).await?;
 
     // wait for termination signal
     info!("waiting for ^C to terminate ...");

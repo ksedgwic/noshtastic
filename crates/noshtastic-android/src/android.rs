@@ -20,7 +20,7 @@ use std::{
     os::raw::c_void,
     sync::{Arc, Mutex},
 };
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, Notify};
 
 use noshtastic_link::{self, LinkRef};
 use noshtastic_sync::{sync::SyncRef, Sync};
@@ -371,9 +371,21 @@ async fn setup_noshtastic(radio_name: &str) -> Result<()> {
             .context("create_link failed")?;
 
     let ndb = init_nostrdb().context("init_nostrdb failed")?;
-    let syncref =
-        Sync::new(ndb.clone(), link_tx, link_rx, stop_signal).context("Sync::new failed")?;
-    let relay = noshtastic_relay::start_localhost_relay(ndb.clone()).await?;
+
+    // The relay doesn't see events when they arrive via the mesh and
+    // are inserted in the database directly, use this channel to send
+    // them directly to the relay.
+    let (incoming_event_tx, incoming_event_rx) = mpsc::unbounded_channel::<String>();
+
+    let syncref = Sync::new(
+        ndb.clone(),
+        link_tx,
+        link_rx,
+        incoming_event_tx,
+        stop_signal,
+    )
+    .context("Sync::new failed")?;
+    let relay = noshtastic_relay::start_localhost_relay(ndb.clone(), incoming_event_rx).await?;
     {
         let mut state = GLOBAL_STATE.lock().unwrap();
         state.link = Some(linkref);
