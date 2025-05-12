@@ -229,13 +229,11 @@ pub(crate) struct LinkPacketRouter {
 }
 
 impl PacketRouter<(), LinkError> for LinkPacketRouter {
-    fn handle_packet_from_radio(&mut self, packet: FromRadio) -> Result<(), LinkError> {
-        dbg!(packet);
+    fn handle_packet_from_radio(&mut self, _packet: FromRadio) -> Result<(), LinkError> {
         Ok(())
     }
 
-    fn handle_mesh_packet(&mut self, packet: MeshPacket) -> Result<(), LinkError> {
-        dbg!(packet);
+    fn handle_mesh_packet(&mut self, _packet: MeshPacket) -> Result<(), LinkError> {
         Ok(())
     }
 

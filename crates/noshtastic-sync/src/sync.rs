@@ -190,7 +190,6 @@ impl Sync {
                     // from the mesh
                     debug!("suppressing send of recently inserted {}", msgid);
                 } else {
-                    dbg!(&note_json);
                     self.send_encoded_note(MsgId::from_nostr_msgid(note.id()), &note_json)?;
                 }
             }
