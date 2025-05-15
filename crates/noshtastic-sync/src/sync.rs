@@ -294,7 +294,7 @@ impl Sync {
 
     fn handle_raw_note(&mut self, msgid: MsgId, raw_note: RawNote) {
         if let Ok(utf8_str) = std::str::from_utf8(&raw_note.data) {
-            info!("saw RawNote {}: {}", msgid, utf8_str);
+            debug!("saw RawNote {}: {}", msgid, utf8_str);
 
             // first, store it in the db
             if let Err(err) = self
@@ -318,7 +318,7 @@ impl Sync {
 
     fn handle_enc_note(&mut self, msgid: MsgId, enc_note: EncNote) {
         let utf8_str = enc_note.to_string();
-        info!("saw EncNote {}: {}", msgid, utf8_str);
+        debug!("saw EncNote {}: {}", msgid, utf8_str);
 
         // first, store it in the db
         if let Err(err) = self
