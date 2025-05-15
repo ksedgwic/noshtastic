@@ -1469,6 +1469,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "227748d55f2f0ab4735d87fd623798cb6b664512fe979705f829c9f81c934465"
 
 [[package]]
+name = "lru"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f8cc7106155f10bdf99a6f379688f543ad6596a415375b36a59a054ceda1198"
+
+[[package]]
 name = "mach2"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1720,8 +1726,7 @@ dependencies = [
 [[package]]
 name = "nostr"
 version = "0.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95d3f2f0d564cce3ebe09bb1343af67d88c60108cedc518a307dfdf6e3f503b6"
+source = "git+https://github.com/ksedgwic/nostr?rev=64eb8ca861996b66e9821dd8b53316453a518074#64eb8ca861996b66e9821dd8b53316453a518074"
 dependencies = [
  "base64",
  "bech32",
@@ -1744,10 +1749,9 @@ dependencies = [
 [[package]]
 name = "nostr-database"
 version = "0.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de6dc456a11d26f99a932b6531d94c20cb2e274ada6eab1d2438e2fb9c944af5"
+source = "git+https://github.com/ksedgwic/nostr?rev=64eb8ca861996b66e9821dd8b53316453a518074#64eb8ca861996b66e9821dd8b53316453a518074"
 dependencies = [
- "lru",
+ "lru 0.14.0",
  "nostr",
  "tokio",
 ]
@@ -1755,8 +1759,7 @@ dependencies = [
 [[package]]
 name = "nostr-ndb"
 version = "0.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd635b914b167437cb1f3b20fd256068f2fc9d622d9e05dfd13f0b097e81b609"
+source = "git+https://github.com/ksedgwic/nostr?rev=64eb8ca861996b66e9821dd8b53316453a518074#64eb8ca861996b66e9821dd8b53316453a518074"
 dependencies = [
  "nostr",
  "nostr-database",
@@ -1766,8 +1769,7 @@ dependencies = [
 [[package]]
 name = "nostr-relay-builder"
 version = "0.41.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7846558d9aadaf2e6ec1f8d12dd94a7e8c61d9cb799b80b3c2affc7f1e214dc6"
+source = "git+https://github.com/ksedgwic/nostr?rev=64eb8ca861996b66e9821dd8b53316453a518074#64eb8ca861996b66e9821dd8b53316453a518074"
 dependencies = [
  "async-utility",
  "async-wsocket",
@@ -1788,7 +1790,7 @@ dependencies = [
  "async-utility",
  "async-wsocket",
  "atomic-destructor",
- "lru",
+ "lru 0.13.0",
  "negentropy 0.3.1",
  "negentropy 0.5.0",
  "nostr",

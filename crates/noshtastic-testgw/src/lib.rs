@@ -126,7 +126,6 @@ mod tests {
             })
             .collect();
         let filter = Filter::new().authors(authors.iter()).kinds([1]).build();
-        dbg!(authors);
         assert_eq!(
             filter.json().unwrap(),
             r#"{"authors":["379e863e8357163b5bce5d2688dc4f1dcc2d505222fb8d74db600f30535dfdfe"],"kinds":[1]}"#

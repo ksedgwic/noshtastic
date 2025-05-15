@@ -24,11 +24,19 @@ chrono = "0.4"
 env_logger = "0.11"
 hex = "0.4"
 log = "0.4"
-nostr = "0.41"
-nostr-relay-builder = "0.41"
+#nostr = "0.41"
+#nostr-relay-builder = "0.41"
+nostr = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074" }
+nostr-relay-builder = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074", features = ["multifilter-compat"] }
 nostrdb = "0.6"
 prost = "0.11"
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.42", features = ["full"] }
 tracing = { version = "0.1", features = ["log", "log-always"] }
+
+[patch.crates-io]
+nostr        = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074" }
+nostr-relay-builder = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074" }
+nostr-ndb    = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074" }
+nostr-database = { git = "https://github.com/ksedgwic/nostr", rev = "64eb8ca861996b66e9821dd8b53316453a518074" }
