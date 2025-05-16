@@ -20,8 +20,8 @@ use tokio::{
 };
 
 use noshtastic_link::{
-    self, Action, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
-    Priority,
+    self, Action, LinkConfig, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload,
+    MsgId, Priority,
 };
 
 use crate::{
@@ -35,6 +35,7 @@ const SYNC_OUTGOING_REFILL_THRESH: usize = 10;
 const SYNC_OUTGOING_PAUSE_THRESH: usize = 50;
 
 pub struct Sync {
+    _link_config: Arc<LinkConfig>,
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::UnboundedSender<LinkMessage>,
@@ -52,6 +53,7 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
     pub fn new(
+        _link_config: Arc<LinkConfig>,
         ndb: Ndb,
         link_tx: mpsc::UnboundedSender<LinkMessage>,
         link_rx: mpsc::UnboundedReceiver<LinkMessage>,
@@ -60,6 +62,7 @@ impl Sync {
     ) -> SyncResult<SyncRef> {
         let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
         let syncref = Arc::new(Mutex::new(Sync {
+            _link_config: _link_config.clone(),
             _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,

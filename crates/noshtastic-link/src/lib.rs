@@ -6,6 +6,7 @@
 use log::*;
 use meshtastic::utils;
 use sha2::{Digest, Sha256};
+use std::convert::TryFrom;
 use std::{convert::From, fmt, fmt::Debug, sync::Arc};
 use tokio::sync::{mpsc, Mutex, Notify};
 
@@ -149,6 +150,7 @@ pub async fn create_link(
     maybe_hint: &Option<String>,
     stop_signal: Arc<Notify>,
 ) -> LinkResult<(
+    Arc<LinkConfig>,
     LinkRef,
     mpsc::UnboundedSender<LinkMessage>,
     mpsc::UnboundedReceiver<LinkMessage>,
@@ -165,8 +167,8 @@ pub async fn create_link(
     debug!("stream_api configure starting");
     let config_id = utils::generate_rand_id();
     let configured_stream_api = connected_stream_api.configure(config_id).await?;
-    wait_for_config_complete(&mut mesh_in_rx, config_id).await?;
-    debug!("stream_api configure finished");
+    let link_config = wait_for_config_complete(&mut mesh_in_rx, config_id).await?;
+    debug!("stream_api configure finished: {:?}", link_config);
 
     // create some channels
     // +-----------+               +------------+              +------------+
@@ -181,6 +183,7 @@ pub async fn create_link(
 
     // create the link
     let linkref = Arc::new(Mutex::new(Link::new(
+        link_config.clone(),
         configured_stream_api,
         client_out_tx,
         stop_signal.clone(),
@@ -190,16 +193,51 @@ pub async fn create_link(
     Link::start(&linkref, mesh_in_rx, client_in_rx, stop_signal.clone()).await?;
 
     info!("create_link finished");
-    Ok((linkref, client_in_tx, client_out_rx))
+    Ok((link_config, linkref, client_in_tx, client_out_rx))
 }
 
 use meshtastic::protobufs;
+use meshtastic::protobufs::config::lo_ra_config::ModemPreset;
+use meshtastic::protobufs::config::LoRaConfig;
+use meshtastic::protobufs::config::PayloadVariant as CfgVariant;
 use meshtastic::protobufs::from_radio::PayloadVariant;
+
+#[derive(Debug, Clone)]
+pub struct LinkConfig {
+    pub data_kbps: f32,
+}
+
+impl LinkConfig {
+    pub fn from_lora_config(lora: &LoRaConfig) -> LinkConfig {
+        if !lora.use_preset {
+            panic!("cannot estimate bit rates for non‐preset configs");
+        }
+
+        let preset = ModemPreset::try_from(lora.modem_preset)
+            .unwrap_or_else(|raw| panic!("unknown modem_preset: {}", raw));
+
+        // From: https://meshtastic.org/docs/overview/radio-settings/#presets
+        let data_kbps = match preset {
+            ModemPreset::VeryLongSlow => 0.09,
+            ModemPreset::LongSlow => 0.18,
+            ModemPreset::LongModerate => 0.34,
+            ModemPreset::LongFast => 1.07,
+            ModemPreset::MediumSlow => 1.95,
+            ModemPreset::MediumFast => 3.52,
+            ModemPreset::ShortSlow => 6.25,
+            ModemPreset::ShortFast => 10.94,
+            ModemPreset::ShortTurbo => 21.88,
+        };
+
+        LinkConfig { data_kbps }
+    }
+}
 
 pub async fn wait_for_config_complete(
     decoded_listener: &mut mpsc::UnboundedReceiver<protobufs::FromRadio>,
     config_id: u32,
-) -> LinkResult<()> {
+) -> LinkResult<Arc<LinkConfig>> {
+    let mut maybe_config: Option<LinkConfig> = None;
     while let Some(packet) = decoded_listener.recv().await {
         // Check the payload_variant field
         if let Some(payload) = packet.payload_variant {
@@ -207,7 +245,10 @@ pub async fn wait_for_config_complete(
                 PayloadVariant::ConfigCompleteId(id) => {
                     if id == config_id {
                         log::debug!("Received ConfigComplete for ID {id}, config is finished");
-                        return Ok(());
+                        return match maybe_config {
+                            None => Err(LinkError::internal_error("Missing LoRaConfig")),
+                            Some(link_cfg) => Ok(Arc::new(link_cfg)),
+                        };
                     } else {
                         log::info!("Got ConfigCompleteId for {id}, but expecting {config_id}");
                     }
@@ -224,6 +265,9 @@ pub async fn wait_for_config_complete(
                 }
                 PayloadVariant::Config(cfg) => {
                     log::info!("saw Config: {:?}", cfg);
+                    if let Some(CfgVariant::Lora(lora_cfg)) = cfg.payload_variant {
+                        maybe_config = Some(LinkConfig::from_lora_config(&lora_cfg));
+                    }
                 }
                 PayloadVariant::Channel(ch) => {
                     log::info!(

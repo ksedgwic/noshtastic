@@ -365,7 +365,7 @@ async fn setup_noshtastic(radio_name: &str) -> Result<()> {
     let stop_signal = Arc::new(Notify::new());
     let maybe_hint = Some(radio_name.to_string());
 
-    let (linkref, link_tx, link_rx) =
+    let (link_config, linkref, link_tx, link_rx) =
         noshtastic_link::create_link(&maybe_hint, stop_signal.clone())
             .await
             .context("create_link failed")?;
@@ -378,6 +378,7 @@ async fn setup_noshtastic(radio_name: &str) -> Result<()> {
     let (incoming_event_tx, incoming_event_rx) = mpsc::unbounded_channel::<String>();
 
     let syncref = Sync::new(
+        link_config,
         ndb.clone(),
         link_tx,
         link_rx,

@@ -17,7 +17,9 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
+use crate::{
+    Action, LinkConfig, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority,
+};
 
 const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
 const LINK_OUTGOING_QUEUE_MAX: usize = 100;
@@ -50,14 +52,16 @@ impl Queues {
 
 #[derive(Debug)]
 pub(crate) struct Outgoing {
+    _link_config: Arc<LinkConfig>,
     queuesref: Arc<Mutex<Queues>>,
     notify: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl Outgoing {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(_link_config: Arc<LinkConfig>) -> Self {
         let queuesref = Arc::new(Mutex::new(Queues::new()));
         Outgoing {
+            _link_config,
             queuesref,
             notify: None,
         }

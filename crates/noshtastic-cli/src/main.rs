@@ -126,7 +126,8 @@ async fn main() -> Result<()> {
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
     let mut testgw = TestGW::new(ndb.clone(), &args.testgw_relay, &args.testgw_filter)?;
-    let (_linkref, link_tx, link_rx) = create_link(&args.serial, stop_signal.clone()).await?;
+    let (link_config, _linkref, link_tx, link_rx) =
+        create_link(&args.serial, stop_signal.clone()).await?;
 
     // The relay doesn't see events when they arrive via the mesh and
     // are inserted in the database directly, use this channel to send
@@ -134,6 +135,7 @@ async fn main() -> Result<()> {
     let (incoming_event_tx, incoming_event_rx) = mpsc::unbounded_channel::<String>();
 
     let syncref = Sync::new(
+        link_config,
         ndb.clone(),
         link_tx,
         link_rx,
