@@ -35,7 +35,6 @@ const LINK_READY_HOLDOFF_SECS: u64 = 5; // wait this long after settled
 const LINK_INFO_SECS: u64 = 60; // send link info periodically
 
 pub struct Link {
-    pub(crate) _link_config: Arc<LinkConfig>,
     pub(crate) stream_api: ConnectedStreamApi,
     client_out_tx: mpsc::UnboundedSender<LinkMessage>,
     _stop_signal: Arc<Notify>,
@@ -49,19 +48,18 @@ pub type LinkRef = Arc<tokio::sync::Mutex<Link>>;
 
 impl Link {
     pub(crate) fn new(
-        _link_config: Arc<LinkConfig>,
+        link_config: &LinkConfig,
         stream_api: ConnectedStreamApi,
         client_out_tx: mpsc::UnboundedSender<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> Self {
         Link {
-            _link_config: _link_config.clone(),
             stream_api,
             client_out_tx,
             _stop_signal: stop_signal,
             my_node_num: 0,
             fragcache: FragmentCache::new(),
-            outgoing: Outgoing::new(_link_config.clone()),
+            outgoing: Outgoing::new(link_config),
             ready_deadline: Instant::now() + Duration::from_secs(LINK_READY_HOLDOFF_SECS),
             declared_ready: false,
         }

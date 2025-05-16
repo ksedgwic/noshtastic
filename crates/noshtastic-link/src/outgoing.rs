@@ -21,8 +21,33 @@ use crate::{
     Action, LinkConfig, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority,
 };
 
-const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
-const LINK_OUTGOING_QUEUE_MAX: usize = 100;
+#[derive(Debug)]
+struct OutgoingPolicy {
+    tx_rate_limit_msec: u64,
+    outgoing_queue_max: usize,
+}
+
+impl OutgoingPolicy {
+    fn from_link_config(link_cfg: &LinkConfig) -> Self {
+        // baseline data rate for “defaults” = 3.52 kbps (MEDIUM_FAST)
+        const BASE_DATA_KBPS: f32 = 3.52;
+        const TX_RATE_LIMIT_MSEC: f32 = 10_000.0;
+        const OUTGOING_QUEUE_MAX: f32 = 100.0;
+
+        // scale factors
+        let rate_scale = BASE_DATA_KBPS / link_cfg.data_kbps;
+        let queue_scale = link_cfg.data_kbps / BASE_DATA_KBPS;
+
+        // scale to match other data rates
+        let tx_rate_limit_msec = (TX_RATE_LIMIT_MSEC * rate_scale).max(1.0).round() as u64;
+        let outgoing_queue_max = (OUTGOING_QUEUE_MAX * queue_scale).max(1.0).round() as usize;
+
+        OutgoingPolicy {
+            tx_rate_limit_msec,
+            outgoing_queue_max,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Queues {
@@ -52,16 +77,18 @@ impl Queues {
 
 #[derive(Debug)]
 pub(crate) struct Outgoing {
-    _link_config: Arc<LinkConfig>,
+    policy: OutgoingPolicy,
     queuesref: Arc<Mutex<Queues>>,
     notify: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl Outgoing {
-    pub(crate) fn new(_link_config: Arc<LinkConfig>) -> Self {
+    pub(crate) fn new(link_config: &LinkConfig) -> Self {
         let queuesref = Arc::new(Mutex::new(Queues::new()));
+        let policy = OutgoingPolicy::from_link_config(link_config);
+        info!("OutgoingPolicy: {:?}", policy);
         Outgoing {
-            _link_config,
+            policy,
             queuesref,
             notify: None,
         }
@@ -85,7 +112,7 @@ impl Outgoing {
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
-        let outcome = if queue.len() > LINK_OUTGOING_QUEUE_MAX {
+        let outcome = if queue.len() > self.policy.outgoing_queue_max {
             Action::Limit
         } else {
             match options.action {
@@ -143,6 +170,7 @@ impl Outgoing {
         let (notify, mut wake) = mpsc::unbounded_channel::<()>();
         self.notify = Some(notify);
         let queueref = self.queuesref.clone();
+        let pause_msec = self.policy.tx_rate_limit_msec;
         task::spawn(async move {
             info!("outgoing regulator starting");
             loop {
@@ -211,7 +239,7 @@ impl Outgoing {
 
                         // IMPORTANT - it's important not to overload the mesh
                         // network.  Don't send packets back-to-back!
-                        sleep(Duration::from_secs(LINK_TX_RATE_LIMIT_SECS)).await;
+                        sleep(Duration::from_millis(pause_msec)).await;
                     }
                     None => {
                         drop(queues);

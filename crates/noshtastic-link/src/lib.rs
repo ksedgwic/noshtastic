@@ -150,7 +150,7 @@ pub async fn create_link(
     maybe_hint: &Option<String>,
     stop_signal: Arc<Notify>,
 ) -> LinkResult<(
-    Arc<LinkConfig>,
+    LinkConfig,
     LinkRef,
     mpsc::UnboundedSender<LinkMessage>,
     mpsc::UnboundedReceiver<LinkMessage>,
@@ -183,7 +183,7 @@ pub async fn create_link(
 
     // create the link
     let linkref = Arc::new(Mutex::new(Link::new(
-        link_config.clone(),
+        &link_config,
         configured_stream_api,
         client_out_tx,
         stop_signal.clone(),
@@ -236,7 +236,7 @@ impl LinkConfig {
 pub async fn wait_for_config_complete(
     decoded_listener: &mut mpsc::UnboundedReceiver<protobufs::FromRadio>,
     config_id: u32,
-) -> LinkResult<Arc<LinkConfig>> {
+) -> LinkResult<LinkConfig> {
     let mut maybe_config: Option<LinkConfig> = None;
     while let Some(packet) = decoded_listener.recv().await {
         // Check the payload_variant field
@@ -247,7 +247,7 @@ pub async fn wait_for_config_complete(
                         log::debug!("Received ConfigComplete for ID {id}, config is finished");
                         return match maybe_config {
                             None => Err(LinkError::internal_error("Missing LoRaConfig")),
-                            Some(link_cfg) => Ok(Arc::new(link_cfg)),
+                            Some(link_cfg) => Ok(link_cfg),
                         };
                     } else {
                         log::info!("Got ConfigCompleteId for {id}, but expecting {config_id}");

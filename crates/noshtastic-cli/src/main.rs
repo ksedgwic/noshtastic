@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
     let (incoming_event_tx, incoming_event_rx) = mpsc::unbounded_channel::<String>();
 
     let syncref = Sync::new(
-        link_config,
+        &link_config,
         ndb.clone(),
         link_tx,
         link_rx,

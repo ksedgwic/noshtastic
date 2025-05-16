@@ -29,13 +29,46 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
-const SYNC_NOTE_IDLE_SECS: u64 = 120;
-const SYNC_RECONCILE_IDLE_SECS: u64 = 60;
-const SYNC_OUTGOING_REFILL_THRESH: usize = 10;
-const SYNC_OUTGOING_PAUSE_THRESH: usize = 50;
+#[derive(Debug)]
+struct SyncPolicy {
+    outgoing_refill_thresh: usize,
+    outgoing_pause_thresh: usize,
+    note_idle_secs: u64,
+    reconcile_idle_secs: u64,
+}
+
+impl SyncPolicy {
+    fn from_link_config(link_cfg: &LinkConfig) -> Self {
+        // baseline data rate for “defaults” = 3.52 kbps (MEDIUM_FAST)
+        const BASE_DATA_KBPS: f32 = 3.52;
+        const OUTGOING_REFILL_THRESH: f32 = 10.0;
+        const OUTGOING_PAUSE_THRESH: f32 = 50.0;
+        const NOTE_IDLE_SECS: f32 = 120.0;
+        const RECONCILE_IDLE_SECS: f32 = 120.0;
+
+        let queue_scale = link_cfg.data_kbps / BASE_DATA_KBPS;
+        let rate_scale = BASE_DATA_KBPS / link_cfg.data_kbps;
+
+        // scale to match other data rates
+        let outgoing_refill_thresh =
+            (OUTGOING_REFILL_THRESH * queue_scale).max(1.0).round() as usize;
+        let outgoing_pause_thresh = (OUTGOING_PAUSE_THRESH * queue_scale)
+            .max((outgoing_refill_thresh + 1) as f32)
+            .round() as usize;
+        let note_idle_secs = (NOTE_IDLE_SECS * rate_scale).max(1.0).round() as u64;
+        let reconcile_idle_secs = (RECONCILE_IDLE_SECS * rate_scale).max(1.0).round() as u64;
+
+        SyncPolicy {
+            outgoing_refill_thresh,
+            outgoing_pause_thresh,
+            note_idle_secs,
+            reconcile_idle_secs,
+        }
+    }
+}
 
 pub struct Sync {
-    _link_config: Arc<LinkConfig>,
+    policy: SyncPolicy,
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
     link_tx: mpsc::UnboundedSender<LinkMessage>,
@@ -53,7 +86,7 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
     pub fn new(
-        _link_config: Arc<LinkConfig>,
+        link_config: &LinkConfig,
         ndb: Ndb,
         link_tx: mpsc::UnboundedSender<LinkMessage>,
         link_rx: mpsc::UnboundedReceiver<LinkMessage>,
@@ -61,8 +94,10 @@ impl Sync {
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
+        let policy = SyncPolicy::from_link_config(link_config);
+        info!("SyncPolicy: {:?}", policy);
         let syncref = Arc::new(Mutex::new(Sync {
-            _link_config: _link_config.clone(),
+            policy,
             _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
@@ -103,7 +138,7 @@ impl Sync {
 
         // if we have too many outgoing messages pause sync reconciliation
         let old_pause_sync = sync.pause_sync;
-        sync.pause_sync = info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_PAUSE_THRESH;
+        sync.pause_sync = info.qlen[0] + info.qlen[1] > sync.policy.outgoing_pause_thresh;
         if sync.pause_sync != old_pause_sync {
             if sync.pause_sync {
                 info!("outgoing queues full, pausing sync reconciliation");
@@ -119,17 +154,17 @@ impl Sync {
             return;
         }
 
-        if sync.last_note_recv.elapsed().as_secs() < SYNC_NOTE_IDLE_SECS {
+        if sync.last_note_recv.elapsed().as_secs() < sync.policy.note_idle_secs {
             info!("recently receiving notes, defer sync initiation");
             return;
         }
 
-        if sync.last_sync_recv.elapsed().as_secs() < SYNC_RECONCILE_IDLE_SECS {
+        if sync.last_sync_recv.elapsed().as_secs() < sync.policy.reconcile_idle_secs {
             info!("recently reconciling, defer sync initiation");
             return;
         }
 
-        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_REFILL_THRESH {
+        if info.qlen[0] + info.qlen[1] > sync.policy.outgoing_refill_thresh {
             info!("outgoing queues above refill threshold, defer sync initiation");
             return;
         }
