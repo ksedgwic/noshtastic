@@ -42,7 +42,6 @@ pub struct LinkOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Priority {
-    Low,
     Normal,
     High,
 }
@@ -100,7 +99,7 @@ impl LinkOptionsBuilder {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkInfo {
-    pub qlen: [usize; 3], // lengths [high, normal, low]
+    pub qlen: [usize; 2], // lengths [high, normal]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

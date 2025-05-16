@@ -51,7 +51,6 @@ impl OutgoingPolicy {
 
 #[derive(Debug)]
 struct Queues {
-    low: VecDeque<(MsgId, LinkFrame)>,
     normal: VecDeque<(MsgId, LinkFrame)>,
     high: VecDeque<(MsgId, LinkFrame)>,
 }
@@ -59,14 +58,13 @@ struct Queues {
 impl Queues {
     pub fn new() -> Self {
         Queues {
-            low: VecDeque::new(),
             normal: VecDeque::new(),
             high: VecDeque::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.low.is_empty() && self.normal.is_empty() && self.high.is_empty()
+        self.normal.is_empty() && self.high.is_empty()
     }
 }
 
@@ -94,9 +92,9 @@ impl Outgoing {
         }
     }
 
-    pub(crate) async fn qlen(&self) -> [usize; 3] {
+    pub(crate) async fn qlen(&self) -> [usize; 2] {
         let queues = self.queuesref.lock().await;
-        [queues.high.len(), queues.normal.len(), queues.low.len()]
+        [queues.high.len(), queues.normal.len()]
     }
 
     pub(crate) async fn enqueue(
@@ -108,7 +106,6 @@ impl Outgoing {
         let mut queues = self.queuesref.lock().await;
         let need_wakeup = queues.is_empty();
         let queue = match options.priority {
-            Priority::Low => &mut queues.low,
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
@@ -151,7 +148,6 @@ impl Outgoing {
 
         // Determine the queue to search based on priority
         let queue = match options.priority {
-            Priority::Low => &mut queues.low,
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
@@ -179,10 +175,9 @@ impl Outgoing {
                     .high
                     .pop_front()
                     .or_else(|| queues.normal.pop_front())
-                    .or_else(|| queues.low.pop_front())
                 {
                     Some((msgid, frame)) => {
-                        let qlens = vec![queues.high.len(), queues.normal.len(), queues.low.len()];
+                        let qlens = vec![queues.high.len(), queues.normal.len()];
                         drop(queues);
 
                         // Serialize the LinkFrame into bytes
