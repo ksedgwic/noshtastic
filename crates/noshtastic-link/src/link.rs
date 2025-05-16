@@ -35,7 +35,7 @@ const LINK_INFO_SECS: u64 = 60; // send link info periodically
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
-    client_out_tx: mpsc::Sender<LinkMessage>,
+    client_out_tx: mpsc::UnboundedSender<LinkMessage>,
     _stop_signal: Arc<Notify>,
     pub(crate) my_node_num: u32,
     fragcache: FragmentCache,
@@ -48,7 +48,7 @@ pub type LinkRef = Arc<tokio::sync::Mutex<Link>>;
 impl Link {
     pub(crate) fn new(
         stream_api: ConnectedStreamApi,
-        client_out_tx: mpsc::Sender<LinkMessage>,
+        client_out_tx: mpsc::UnboundedSender<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> Self {
         Link {
@@ -71,7 +71,7 @@ impl Link {
     pub(crate) async fn start(
         linkref: &LinkRef,
         mesh_in_rx: PacketReceiver,
-        client_in_rx: mpsc::Receiver<LinkMessage>,
+        client_in_rx: mpsc::UnboundedReceiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<()> {
         // Listen for incoming messages from the radio
@@ -174,7 +174,7 @@ impl Link {
                         let link = linkref.lock().await;
                         let qlen = link.outgoing.qlen().await;
                         let info = LinkInfo { qlen };
-                        if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)).await {
+                        if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
                             error!("send link info: failed to send message: {}", err);
                         }
                     }
@@ -192,7 +192,7 @@ impl Link {
         }
         if Instant::now() >= link.ready_deadline {
             // Mark as ready!
-            if let Err(err) = link.client_out_tx.send(LinkMessage::Ready).await {
+            if let Err(err) = link.client_out_tx.send(LinkMessage::Ready) {
                 error!("maybe_declare_ready: failed to send message: {}", err);
             }
             link.declared_ready = true;
@@ -200,7 +200,7 @@ impl Link {
             // Follow with an immediate NodeInfo so we can initiate right away
             let qlen = link.outgoing.qlen().await;
             let info = LinkInfo { qlen };
-            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)).await {
+            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
                 error!("send link info: failed to send message: {}", err);
             }
 
@@ -331,7 +331,7 @@ impl Link {
             .await;
 
         // send the message to the client
-        if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
+        if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)) {
             error!("failed to send message: {}", err);
         }
     }
@@ -368,7 +368,7 @@ impl Link {
         // add the fragment and if completed send the message to the client
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
             info!("completed LinkFrag {}", msgid);
-            if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)).await {
+            if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)) {
                 error!("failed to send message: {}", err);
             }
         }
@@ -407,7 +407,7 @@ impl Link {
 
     fn start_client_listener(
         linkref: LinkRef,
-        mut client_in_rx: mpsc::Receiver<LinkMessage>,
+        mut client_in_rx: mpsc::UnboundedReceiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<()> {
         task::spawn(async move {

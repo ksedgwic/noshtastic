@@ -51,7 +51,7 @@ impl Queues {
 #[derive(Debug)]
 pub(crate) struct Outgoing {
     queuesref: Arc<Mutex<Queues>>,
-    notify: Option<mpsc::Sender<()>>,
+    notify: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl Outgoing {
@@ -87,7 +87,7 @@ impl Outgoing {
             match options.action {
                 Action::Drop => {
                     if !queue.iter().any(|(id, _)| *id == msgid) {
-                        queue.push_back((msgid, frame)); // Enqueue only if no match
+                        queue.push_back((msgid, frame)); // Drop if duplicate
                         Action::Queue
                     } else {
                         Action::Drop
@@ -104,7 +104,7 @@ impl Outgoing {
             }
         };
         if need_wakeup {
-            if let Err(err) = self.notify.as_ref().unwrap().send(()).await {
+            if let Err(err) = self.notify.as_ref().unwrap().send(()) {
                 error!("trouble sending notification to regulator: {:?}", err);
             }
         }
@@ -136,7 +136,7 @@ impl Outgoing {
     }
 
     pub(crate) fn start_regulator(&mut self, linkref: LinkRef) -> LinkResult<()> {
-        let (notify, mut wake) = mpsc::channel::<()>(100);
+        let (notify, mut wake) = mpsc::unbounded_channel::<()>();
         self.notify = Some(notify);
         let queueref = self.queuesref.clone();
         task::spawn(async move {

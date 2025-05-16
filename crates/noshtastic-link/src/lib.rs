@@ -150,8 +150,8 @@ pub async fn create_link(
     stop_signal: Arc<Notify>,
 ) -> LinkResult<(
     LinkRef,
-    mpsc::Sender<LinkMessage>,
-    mpsc::Receiver<LinkMessage>,
+    mpsc::UnboundedSender<LinkMessage>,
+    mpsc::UnboundedReceiver<LinkMessage>,
 )> {
     debug!("info_link starting");
 
@@ -176,9 +176,8 @@ pub async fn create_link(
     // |        rx | <------------ | tx      rx | <----------- | tx         |
     // +-----------+               +------------+              +------------+
 
-    // FIXME - change these to unbounded
-    let (client_in_tx, client_in_rx) = mpsc::channel::<LinkMessage>(100);
-    let (client_out_tx, client_out_rx) = mpsc::channel::<LinkMessage>(100);
+    let (client_in_tx, client_in_rx) = mpsc::unbounded_channel::<LinkMessage>();
+    let (client_out_tx, client_out_rx) = mpsc::unbounded_channel::<LinkMessage>();
 
     // create the link
     let linkref = Arc::new(Mutex::new(Link::new(

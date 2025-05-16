@@ -37,7 +37,7 @@ const SYNC_OUTGOING_PAUSE_THRESH: usize = 50;
 pub struct Sync {
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
-    link_tx: mpsc::Sender<LinkMessage>,
+    link_tx: mpsc::UnboundedSender<LinkMessage>,
     incoming_tx: mpsc::UnboundedSender<String>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
@@ -53,8 +53,8 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 impl Sync {
     pub fn new(
         ndb: Ndb,
-        link_tx: mpsc::Sender<LinkMessage>,
-        link_rx: mpsc::Receiver<LinkMessage>,
+        link_tx: mpsc::UnboundedSender<LinkMessage>,
+        link_rx: mpsc::UnboundedReceiver<LinkMessage>,
         incoming_tx: UnboundedSender<String>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
@@ -200,7 +200,7 @@ impl Sync {
 
     fn start_message_handler(
         syncref: SyncRef,
-        mut receiver: mpsc::Receiver<LinkMessage>,
+        mut receiver: mpsc::UnboundedReceiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) {
         tokio::spawn(async move {
@@ -367,17 +367,15 @@ impl Sync {
             SyncError::internal_error(format!("sync: failed to encode message: {:?}", err))
         })?;
 
-        // queue the outgoing message, this shouldn't block
+        // queue the outgoing message, this won't really block
         task::block_in_place(|| {
             let runtime = tokio::runtime::Handle::current();
             runtime.block_on(async {
-                self.link_tx
-                    .send(LinkMessage::Payload(LinkPayload {
-                        msgid,
-                        data: buffer,
-                        options,
-                    }))
-                    .await
+                self.link_tx.send(LinkMessage::Payload(LinkPayload {
+                    msgid,
+                    data: buffer,
+                    options,
+                }))
             })
         })
         .map_err(|err| {
