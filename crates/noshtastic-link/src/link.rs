@@ -22,7 +22,7 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkMissing, FragmentCache, LinkConfig, LinkFrag, LinkFrame,
+    outgoing::Outgoing, proto::LinkMissing, Action, FragmentCache, LinkConfig, LinkFrag, LinkFrame,
     LinkInfo, LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload,
     Priority,
 };
@@ -397,7 +397,10 @@ impl Link {
                 .enqueue(
                     msgid,
                     link_frame,
-                    LinkOptionsBuilder::new().priority(Priority::High).build(),
+                    LinkOptionsBuilder::new()
+                        .priority(Priority::High)
+                        .action(Action::Drop)
+                        .build(),
                 )
                 .await;
             info!(
