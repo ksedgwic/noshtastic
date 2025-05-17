@@ -136,14 +136,23 @@ impl Sync {
         // sync initiation     - initiate a sync protocol exchange
         // sync reconciliation - respond to sync protocol from other notes
 
-        // if we have too many outgoing messages pause sync reconciliation
-        let old_pause_sync = sync.pause_sync;
-        sync.pause_sync = info.qlen[0] + info.qlen[1] > sync.policy.outgoing_pause_thresh;
-        if sync.pause_sync != old_pause_sync {
-            if sync.pause_sync {
-                info!("outgoing queues full, pausing sync reconciliation");
+        let qlen = info.qlen[0] + info.qlen[1];
+
+        let should_pause = qlen >= sync.policy.outgoing_pause_thresh;
+        if should_pause != sync.pause_sync {
+            sync.pause_sync = should_pause;
+            if should_pause {
+                info!(
+                    "outgoing queues full {}, pausing sync reconciliation until {}",
+                    qlen, sync.policy.outgoing_pause_thresh
+                );
+                return;
             } else {
-                info!("outgoing queues not full, resuming sync reconciliation");
+                info!(
+                    "outgoing queues not full {}, resuming sync reconciliation until {}",
+                    qlen, sync.policy.outgoing_pause_thresh
+                );
+                // drop through here to check for other things
             }
         }
 
@@ -155,17 +164,28 @@ impl Sync {
         }
 
         if sync.last_note_recv.elapsed().as_secs() < sync.policy.note_idle_secs {
-            info!("recently receiving notes, defer sync initiation");
+            info!(
+                "received notes {} secs ago, defer sync initiation until {}",
+                sync.last_note_recv.elapsed().as_secs(),
+                sync.policy.note_idle_secs
+            );
             return;
         }
 
         if sync.last_sync_recv.elapsed().as_secs() < sync.policy.reconcile_idle_secs {
-            info!("recently reconciling, defer sync initiation");
+            info!(
+                "reconciled {} secs ago, defer sync initiation until {}",
+                sync.last_sync_recv.elapsed().as_secs(),
+                sync.policy.reconcile_idle_secs
+            );
             return;
         }
 
-        if info.qlen[0] + info.qlen[1] > sync.policy.outgoing_refill_thresh {
-            info!("outgoing queues above refill threshold, defer sync initiation");
+        if qlen > sync.policy.outgoing_refill_thresh {
+            info!(
+                "outgoing queues full {}, defer sync initiation until {}",
+                qlen, sync.policy.outgoing_refill_thresh
+            );
             return;
         }
 
@@ -301,7 +321,7 @@ impl Sync {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
                 sync.last_sync_recv = Instant::now();
                 if sync.pause_sync {
-                    info!("outgoing queues full, pausing sync reconciliation");
+                    info!("outgoing queues full, sync reconcilation paused");
                     return;
                 }
                 let mut have_ids = vec![];
