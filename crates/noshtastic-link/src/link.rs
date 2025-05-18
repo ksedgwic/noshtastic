@@ -82,9 +82,6 @@ impl Link {
         // Listen for new outgoing messages from the client
         Link::start_client_listener(linkref.clone(), client_in_rx, stop_signal.clone())?;
 
-        // Periodically request retransmission of missing fragments
-        Link::start_fragchache_periodic(linkref.clone(), stop_signal.clone())?;
-
         // Start the regulator which sends all outgoing packets
         linkref
             .lock()
@@ -95,7 +92,8 @@ impl Link {
         // Check for link ready
         Link::start_check_ready(linkref.clone(), stop_signal.clone())?;
 
-        // Report LinkInfo (this initiates negentropy sync when appropriate)
+        // Report LinkInfo (this initiates negentropy sync when
+        // appropriate, and handles the fragcache retries)
         Link::start_link_info(linkref.clone(), stop_signal.clone())?;
 
         Ok(())
@@ -119,25 +117,6 @@ impl Link {
                 }
             }
             info!("mesh_listener finished");
-        });
-        Ok(())
-    }
-
-    fn start_fragchache_periodic(linkref: LinkRef, stop_signal: Arc<Notify>) -> LinkResult<()> {
-        let mut interval = time::interval(Duration::from_secs(5));
-        task::spawn(async move {
-            info!("fragcache_periodic starting");
-            loop {
-                tokio::select! {
-                    _ = stop_signal.notified() => {
-                        break;
-                    }
-                    _ = interval.tick() => {
-                        Self::send_fragment_retries(linkref.clone()).await;
-                    }
-                }
-            }
-            info!("fragcache_periodic finished");
         });
         Ok(())
     }
@@ -173,12 +152,15 @@ impl Link {
                         break;
                     }
                     _ = interval.tick() => {
-                        let link = linkref.lock().await;
-                        let qlen = link.outgoing.qlen().await;
-                        let info = LinkInfo { qlen };
-                        if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
-                            error!("send link info: failed to send message: {}", err);
+                        {
+                            let link = linkref.lock().await;
+                            let qlen = link.outgoing.qlen().await;
+                            let info = LinkInfo { qlen };
+                            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
+                                error!("send link info: failed to send message: {}", err);
+                            }
                         }
+                        Self::send_fragment_retries(linkref.clone()).await;
                     }
                 }
             }
