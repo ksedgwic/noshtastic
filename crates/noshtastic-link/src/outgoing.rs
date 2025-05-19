@@ -17,14 +17,40 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{Action, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority};
+use crate::{
+    Action, LinkConfig, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority,
+};
 
-const LINK_TX_RATE_LIMIT_SECS: u64 = 10;
-const LINK_OUTGOING_QUEUE_MAX: usize = 100;
+#[derive(Debug)]
+struct OutgoingPolicy {
+    tx_rate_limit_msec: u64,
+    outgoing_queue_max: usize,
+}
+
+impl OutgoingPolicy {
+    fn from_link_config(link_cfg: &LinkConfig) -> Self {
+        // baseline data rate for “defaults” = 3.52 kbps (MEDIUM_FAST)
+        const BASE_DATA_KBPS: f32 = 3.52;
+        const TX_RATE_LIMIT_MSEC: f32 = 10_000.0;
+        const OUTGOING_QUEUE_MAX: f32 = 100.0;
+
+        // scale factors
+        let rate_scale = BASE_DATA_KBPS / link_cfg.data_kbps;
+        let queue_scale = link_cfg.data_kbps / BASE_DATA_KBPS;
+
+        // scale to match other data rates
+        let tx_rate_limit_msec = (TX_RATE_LIMIT_MSEC * rate_scale).max(1.0).round() as u64;
+        let outgoing_queue_max = (OUTGOING_QUEUE_MAX * queue_scale).max(1.0).round() as usize;
+
+        OutgoingPolicy {
+            tx_rate_limit_msec,
+            outgoing_queue_max,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct Queues {
-    low: VecDeque<(MsgId, LinkFrame)>,
     normal: VecDeque<(MsgId, LinkFrame)>,
     high: VecDeque<(MsgId, LinkFrame)>,
 }
@@ -32,14 +58,13 @@ struct Queues {
 impl Queues {
     pub fn new() -> Self {
         Queues {
-            low: VecDeque::new(),
             normal: VecDeque::new(),
             high: VecDeque::new(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.low.is_empty() && self.normal.is_empty() && self.high.is_empty()
+        self.normal.is_empty() && self.high.is_empty()
     }
 }
 
@@ -50,22 +75,26 @@ impl Queues {
 
 #[derive(Debug)]
 pub(crate) struct Outgoing {
+    policy: OutgoingPolicy,
     queuesref: Arc<Mutex<Queues>>,
-    notify: Option<mpsc::Sender<()>>,
+    notify: Option<mpsc::UnboundedSender<()>>,
 }
 
 impl Outgoing {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(link_config: &LinkConfig) -> Self {
         let queuesref = Arc::new(Mutex::new(Queues::new()));
+        let policy = OutgoingPolicy::from_link_config(link_config);
+        info!("OutgoingPolicy: {:?}", policy);
         Outgoing {
+            policy,
             queuesref,
             notify: None,
         }
     }
 
-    pub(crate) async fn qlen(&self) -> [usize; 3] {
+    pub(crate) async fn qlen(&self) -> [usize; 2] {
         let queues = self.queuesref.lock().await;
-        [queues.high.len(), queues.normal.len(), queues.low.len()]
+        [queues.high.len(), queues.normal.len()]
     }
 
     pub(crate) async fn enqueue(
@@ -77,17 +106,16 @@ impl Outgoing {
         let mut queues = self.queuesref.lock().await;
         let need_wakeup = queues.is_empty();
         let queue = match options.priority {
-            Priority::Low => &mut queues.low,
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
-        let outcome = if queue.len() > LINK_OUTGOING_QUEUE_MAX {
+        let outcome = if queue.len() > self.policy.outgoing_queue_max {
             Action::Limit
         } else {
             match options.action {
                 Action::Drop => {
                     if !queue.iter().any(|(id, _)| *id == msgid) {
-                        queue.push_back((msgid, frame)); // Enqueue only if no match
+                        queue.push_back((msgid, frame)); // Drop if duplicate
                         Action::Queue
                     } else {
                         Action::Drop
@@ -104,7 +132,7 @@ impl Outgoing {
             }
         };
         if need_wakeup {
-            if let Err(err) = self.notify.as_ref().unwrap().send(()).await {
+            if let Err(err) = self.notify.as_ref().unwrap().send(()) {
                 error!("trouble sending notification to regulator: {:?}", err);
             }
         }
@@ -120,7 +148,6 @@ impl Outgoing {
 
         // Determine the queue to search based on priority
         let queue = match options.priority {
-            Priority::Low => &mut queues.low,
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
@@ -136,9 +163,10 @@ impl Outgoing {
     }
 
     pub(crate) fn start_regulator(&mut self, linkref: LinkRef) -> LinkResult<()> {
-        let (notify, mut wake) = mpsc::channel::<()>(100);
+        let (notify, mut wake) = mpsc::unbounded_channel::<()>();
         self.notify = Some(notify);
         let queueref = self.queuesref.clone();
+        let pause_msec = self.policy.tx_rate_limit_msec;
         task::spawn(async move {
             info!("outgoing regulator starting");
             loop {
@@ -147,10 +175,9 @@ impl Outgoing {
                     .high
                     .pop_front()
                     .or_else(|| queues.normal.pop_front())
-                    .or_else(|| queues.low.pop_front())
                 {
                     Some((msgid, frame)) => {
-                        let qlens = vec![queues.high.len(), queues.normal.len(), queues.low.len()];
+                        let qlens = vec![queues.high.len(), queues.normal.len()];
                         drop(queues);
 
                         // Serialize the LinkFrame into bytes
@@ -207,7 +234,7 @@ impl Outgoing {
 
                         // IMPORTANT - it's important not to overload the mesh
                         // network.  Don't send packets back-to-back!
-                        sleep(Duration::from_secs(LINK_TX_RATE_LIMIT_SECS)).await;
+                        sleep(Duration::from_millis(pause_msec)).await;
                     }
                     None => {
                         drop(queues);

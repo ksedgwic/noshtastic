@@ -20,8 +20,8 @@ use tokio::{
 };
 
 use noshtastic_link::{
-    self, Action, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
-    Priority,
+    self, Action, LinkConfig, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload,
+    MsgId, Priority,
 };
 
 use crate::{
@@ -29,15 +29,49 @@ use crate::{
     SyncError, SyncMessage, SyncResult,
 };
 
-const SYNC_NOTE_IDLE_SECS: u64 = 120;
-const SYNC_RECONCILE_IDLE_SECS: u64 = 60;
-const SYNC_OUTGOING_REFILL_THRESH: usize = 10;
-const SYNC_OUTGOING_PAUSE_THRESH: usize = 50;
+#[derive(Debug)]
+struct SyncPolicy {
+    outgoing_refill_thresh: usize,
+    outgoing_pause_thresh: usize,
+    note_idle_secs: u64,
+    reconcile_idle_secs: u64,
+}
+
+impl SyncPolicy {
+    fn from_link_config(link_cfg: &LinkConfig) -> Self {
+        // baseline data rate for “defaults” = 3.52 kbps (MEDIUM_FAST)
+        const BASE_DATA_KBPS: f32 = 3.52;
+        const OUTGOING_REFILL_THRESH: f32 = 10.0;
+        const OUTGOING_PAUSE_THRESH: f32 = 50.0;
+        const NOTE_IDLE_SECS: f32 = 120.0;
+        const RECONCILE_IDLE_SECS: f32 = 120.0;
+
+        let queue_scale = link_cfg.data_kbps / BASE_DATA_KBPS;
+        let rate_scale = BASE_DATA_KBPS / link_cfg.data_kbps;
+
+        // scale to match other data rates
+        let outgoing_refill_thresh =
+            (OUTGOING_REFILL_THRESH * queue_scale).max(1.0).round() as usize;
+        let outgoing_pause_thresh = (OUTGOING_PAUSE_THRESH * queue_scale)
+            .max((outgoing_refill_thresh + 1) as f32)
+            .round() as usize;
+        let note_idle_secs = (NOTE_IDLE_SECS * rate_scale).max(1.0).round() as u64;
+        let reconcile_idle_secs = (RECONCILE_IDLE_SECS * rate_scale).max(1.0).round() as u64;
+
+        SyncPolicy {
+            outgoing_refill_thresh,
+            outgoing_pause_thresh,
+            note_idle_secs,
+            reconcile_idle_secs,
+        }
+    }
+}
 
 pub struct Sync {
+    policy: SyncPolicy,
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
-    link_tx: mpsc::Sender<LinkMessage>,
+    link_tx: mpsc::UnboundedSender<LinkMessage>,
     incoming_tx: mpsc::UnboundedSender<String>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
@@ -52,14 +86,18 @@ pub type SyncRef = Arc<std::sync::Mutex<Sync>>;
 
 impl Sync {
     pub fn new(
+        link_config: &LinkConfig,
         ndb: Ndb,
-        link_tx: mpsc::Sender<LinkMessage>,
-        link_rx: mpsc::Receiver<LinkMessage>,
+        link_tx: mpsc::UnboundedSender<LinkMessage>,
+        link_rx: mpsc::UnboundedReceiver<LinkMessage>,
         incoming_tx: UnboundedSender<String>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
         let long_ago = Instant::now() - Duration::from_secs(u64::MAX / 2);
+        let policy = SyncPolicy::from_link_config(link_config);
+        info!("SyncPolicy: {:?}", policy);
         let syncref = Arc::new(Mutex::new(Sync {
+            policy,
             _stop_signal: stop_signal.clone(),
             ndb: ndb.clone(),
             link_tx,
@@ -98,14 +136,23 @@ impl Sync {
         // sync initiation     - initiate a sync protocol exchange
         // sync reconciliation - respond to sync protocol from other notes
 
-        // if we have too many outgoing messages pause sync reconciliation
-        let old_pause_sync = sync.pause_sync;
-        sync.pause_sync = info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_PAUSE_THRESH;
-        if sync.pause_sync != old_pause_sync {
-            if sync.pause_sync {
-                info!("outgoing queues full, pausing sync reconciliation");
+        let qlen = info.qlen[0] + info.qlen[1];
+
+        let should_pause = qlen >= sync.policy.outgoing_pause_thresh;
+        if should_pause != sync.pause_sync {
+            sync.pause_sync = should_pause;
+            if should_pause {
+                info!(
+                    "outgoing queues full {}, pausing sync reconciliation until {}",
+                    qlen, sync.policy.outgoing_pause_thresh
+                );
+                return;
             } else {
-                info!("outgoing queues not full, resuming sync reconciliation");
+                info!(
+                    "outgoing queues not full {}, resuming sync reconciliation until {}",
+                    qlen, sync.policy.outgoing_pause_thresh
+                );
+                // drop through here to check for other things
             }
         }
 
@@ -116,18 +163,29 @@ impl Sync {
             return;
         }
 
-        if sync.last_note_recv.elapsed().as_secs() < SYNC_NOTE_IDLE_SECS {
-            info!("recently receiving notes, defer sync initiation");
+        if sync.last_note_recv.elapsed().as_secs() < sync.policy.note_idle_secs {
+            info!(
+                "received notes {} secs ago, defer sync initiation until {}",
+                sync.last_note_recv.elapsed().as_secs(),
+                sync.policy.note_idle_secs
+            );
             return;
         }
 
-        if sync.last_sync_recv.elapsed().as_secs() < SYNC_RECONCILE_IDLE_SECS {
-            info!("recently reconciling, defer sync initiation");
+        if sync.last_sync_recv.elapsed().as_secs() < sync.policy.reconcile_idle_secs {
+            info!(
+                "reconciled {} secs ago, defer sync initiation until {}",
+                sync.last_sync_recv.elapsed().as_secs(),
+                sync.policy.reconcile_idle_secs
+            );
             return;
         }
 
-        if info.qlen[0] + info.qlen[1] > SYNC_OUTGOING_REFILL_THRESH {
-            info!("outgoing queues above refill threshold, defer sync initiation");
+        if qlen > sync.policy.outgoing_refill_thresh {
+            info!(
+                "outgoing queues full {}, defer sync initiation until {}",
+                qlen, sync.policy.outgoing_refill_thresh
+            );
             return;
         }
 
@@ -200,7 +258,7 @@ impl Sync {
 
     fn start_message_handler(
         syncref: SyncRef,
-        mut receiver: mpsc::Receiver<LinkMessage>,
+        mut receiver: mpsc::UnboundedReceiver<LinkMessage>,
         stop_signal: Arc<Notify>,
     ) {
         tokio::spawn(async move {
@@ -263,7 +321,7 @@ impl Sync {
                 info!("received NegentropyMessage sz: {}", negmsg.data.len());
                 sync.last_sync_recv = Instant::now();
                 if sync.pause_sync {
-                    info!("outgoing queues full, pausing sync reconciliation");
+                    info!("outgoing queues full, sync reconcilation paused");
                     return;
                 }
                 let mut have_ids = vec![];
@@ -367,17 +425,15 @@ impl Sync {
             SyncError::internal_error(format!("sync: failed to encode message: {:?}", err))
         })?;
 
-        // queue the outgoing message, this shouldn't block
+        // queue the outgoing message, this won't really block
         task::block_in_place(|| {
             let runtime = tokio::runtime::Handle::current();
             runtime.block_on(async {
-                self.link_tx
-                    .send(LinkMessage::Payload(LinkPayload {
-                        msgid,
-                        data: buffer,
-                        options,
-                    }))
-                    .await
+                self.link_tx.send(LinkMessage::Payload(LinkPayload {
+                    msgid,
+                    data: buffer,
+                    options,
+                }))
             })
         })
         .map_err(|err| {

@@ -126,36 +126,54 @@ impl FragmentCache {
         None
     }
 
-    // Return LinkMissing requests for each inbound message that has an
-    // overdue fragment and has not been re-requested recently
+    // Return LinkMissing requests for inbound messages with missing fragments.
+    // Retries only within a 300-second window since first fragment seen. After that, purge.
     pub(crate) fn overdue_missing(&mut self) -> Vec<LinkMissing> {
+        const MAX_AGE_SECS: u64 = 300;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
 
         let mut missing_requests = Vec::new();
-        let overdue_seconds = 60;
+        let overdue_secs = 60;
+        let mut purge_list = Vec::new();
 
         for (&msgid, partial) in &mut self.partials {
-            if partial.inbound && now >= partial.lasttry + overdue_seconds {
-                // Collect indices of missing fragments
-                let missing_indices: Vec<u32> = partial
-                    .frags
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, frag)| frag.is_empty())
-                    .map(|(index, _)| index as u32)
-                    .collect();
-
-                if !missing_indices.is_empty() {
-                    partial.lasttry = now;
-                    missing_requests.push(LinkMissing {
-                        msgid: msgid.base,
-                        fragndx: missing_indices,
-                    });
-                }
+            // If message is too old, purge and skip
+            if now >= partial.created + MAX_AGE_SECS {
+                purge_list.push(msgid);
+                continue;
             }
+            // Only retry if overdue since last attempt
+            if now < partial.lasttry + overdue_secs {
+                continue;
+            }
+
+            // Collect indices of fragments still missing
+            let missing_idxs: Vec<u32> = partial
+                .frags
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| f.is_empty())
+                .map(|(i, _)| i as u32)
+                .collect();
+
+            if missing_idxs.is_empty() {
+                continue;
+            }
+
+            // Record this retry time
+            partial.lasttry = now;
+            missing_requests.push(LinkMissing {
+                msgid: msgid.base,
+                fragndx: missing_idxs,
+            });
+        }
+
+        // Purge entries that exceeded the age window
+        for id in purge_list {
+            self.partials.remove(&MsgId::new(id.base, None));
         }
 
         missing_requests
