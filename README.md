@@ -91,5 +91,6 @@ regions.  For example a noshtastic relay might cover **`9q[bc89]`**
 
 Connect an android phone via USB to the build computer and type:
 ```
+git submodule update --init
 make android
 ```
