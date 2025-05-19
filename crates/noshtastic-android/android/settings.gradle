@@ -1,16 +1,29 @@
 pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-    }
-}
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-    }
+  repositories {
+    gradlePluginPortal()
+    google()
+    mavenCentral()
+    mavenLocal()
+  }
+  plugins {
+    // declare the Android Gradle plugin versions here
+    id 'com.android.application' version '8.1.0'
+    id 'com.android.library'   version '8.1.0'
+  }
 }
 
-include ':app'
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+  repositories {
+    google()
+    mavenCentral()
+    mavenLocal()
+  }
+}
+
+rootProject.name = 'noshtastic-android'
+
+// where to find your Java submodules
+include ':app', ':droidplug', ':jni-utils'
+project(':droidplug').projectDir = file('btleplug/src/droidplug/java')
+project(':jni-utils').projectDir = file('jni-utils/java')

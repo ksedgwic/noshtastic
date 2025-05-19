@@ -1,9 +1,21 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
-    id 'com.android.application' version '8.4.1' apply false
-    id 'com.android.library' version '8.4.1' apply false
+  // nothing here—leave empty if this is your root “build.gradle”
 }
 
-task clean(type: Delete) {
-    delete rootProject.buildDir
+subprojects { proj ->
+  // whenever an Android plugin is applied, auto-configure its SDK levels
+  proj.pluginManager.withPlugin('com.android.library') {
+    proj.android.compileSdk 34
+    proj.android.defaultConfig {
+      minSdk 21
+      targetSdk 34
+    }
+  }
+  proj.pluginManager.withPlugin('com.android.application') {
+    proj.android.compileSdk 34
+    proj.android.defaultConfig {
+      minSdk 21
+      targetSdk 34
+    }
+  }
 }

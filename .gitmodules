@@ -1,0 +1,7 @@
+[submodule "crates/noshtastic-android/android/btleplug"]
+	path = crates/noshtastic-android/android/btleplug
+	url = https://github.com/ksedgwic/btleplug
+        branch = 2025-05-gradle-submodule
+[submodule "crates/noshtastic-android/android/jni-utils"]
+	path = crates/noshtastic-android/android/jni-utils
+	url = https://github.com/deviceplug/jni-utils-rs
