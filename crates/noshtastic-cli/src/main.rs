@@ -119,9 +119,16 @@ fn init_nostrdb(data_dir: &str) -> Result<Ndb> {
 async fn main() -> Result<()> {
     init_logger();
 
+    #[cfg(feature = "aws_lc_rs")]
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .unwrap();
+
+    #[cfg(feature = "ring")]
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .unwrap();
+
     let stop_signal = Arc::new(Notify::new());
     let args = build_args_with_help()?;
     let ndb = init_nostrdb(&args.data_dir)?;
