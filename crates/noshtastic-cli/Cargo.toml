@@ -5,6 +5,11 @@ version = { workspace = true }
 authors = ["Ken Sedgwick <ken@bonsai.com>"]
 edition = "2021"
 
+[features]
+default = ["ring"]
+ring = ["rustls/ring"]
+aws_lc_rs = ["rustls/aws_lc_rs"]
+
 [dependencies]
 # local dependencies
 noshtastic-link = { workspace = true }
@@ -24,4 +29,5 @@ tracing = { workspace = true }
 # unique dependencies
 clap = { version = "4.5", features = ["derive"] }
 directories-next = "2.0"
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["logging"]}
+
