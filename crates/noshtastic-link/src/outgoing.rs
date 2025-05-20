@@ -110,25 +110,13 @@ impl Outgoing {
             Priority::High => &mut queues.high,
         };
         let outcome = if queue.len() > self.policy.outgoing_queue_max {
-            Action::Limit
+            Action::Limit // drop
         } else {
-            match options.action {
-                Action::Drop => {
-                    if !queue.iter().any(|(id, _)| *id == msgid) {
-                        queue.push_back((msgid, frame)); // Drop if duplicate
-                        Action::Queue
-                    } else {
-                        Action::Drop
-                    }
-                }
-                Action::Queue => {
-                    queue.push_back((msgid, frame)); // Always enqueue
-                    Action::Queue
-                }
-                Action::Limit => {
-                    error!("shouldn't see option.action set to Limit");
-                    Action::Limit
-                }
+            if !queue.iter().any(|(id, _)| *id == msgid) {
+                queue.push_back((msgid, frame));
+                Action::Queue
+            } else {
+                Action::Dup // drop
             }
         };
         if need_wakeup {

@@ -22,9 +22,8 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkNeed, Action, FragmentCache, LinkConfig, LinkFrag, LinkFrame,
-    LinkInfo, LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload,
-    Priority,
+    outgoing::Outgoing, proto::LinkNeed, FragmentCache, LinkConfig, LinkFrag, LinkFrame, LinkInfo,
+    LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -225,10 +224,7 @@ impl Link {
             .enqueue(
                 msgid,
                 link_frame,
-                LinkOptionsBuilder::new()
-                    .action(crate::Action::Drop)
-                    .priority(Priority::High)
-                    .build(),
+                LinkOptionsBuilder::new().priority(Priority::High).build(),
             )
             .await;
 
@@ -409,10 +405,7 @@ impl Link {
                     .enqueue(
                         retry_id,
                         link_frame,
-                        LinkOptionsBuilder::new()
-                            .priority(Priority::High)
-                            .action(Action::Drop)
-                            .build(),
+                        LinkOptionsBuilder::new().priority(Priority::High).build(),
                     )
                     .await;
 
