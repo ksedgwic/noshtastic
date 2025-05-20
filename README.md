@@ -89,6 +89,19 @@ regions.  For example a noshtastic relay might cover **`9q[bc89]`**
 
 ## Building
 
+### Prerequisites
+
+- Protobuf
+  * fedora: `sudo dnf install -y protobuf protobuf-c protobuf-compiler protobuf-devel`
+  * windows: `choco install protoc`
+
+- Android Studio, with Android NDK properly installed both in path and
+  with `ANDROID_HOME` and `ANDROID_NDK_HOME`
+
+- `cargo install cargo-ndk`
+
+- `rustup target install aarch64-linux-android`
+
 ### Unix CLI
 
 ```

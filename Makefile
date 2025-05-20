@@ -10,7 +10,15 @@ check:
 # NOTE - the `--no-strip` below can be removed to reduce size at the
 # cost of non-symbolic backtraces
 jni: fake
-	cargo ndk --target arm64-v8a --no-strip -o $(ANDROID_DIR)/app/src/main/jniLibs/ build --profile dev
+	cargo ndk \
+	  --target arm64-v8a \
+	  --no-strip \
+	  -o $(ANDROID_DIR)/app/src/main/jniLibs/ \
+	  build \
+	  --profile dev \
+	  --workspace \
+	  --exclude noshtastic-cli \
+	  --exclude noshtastic-testgw
 
 apk: jni
 	cd $(ANDROID_DIR) && ./gradlew build
