@@ -43,7 +43,7 @@ impl SyncPolicy {
         const BASE_DATA_KBPS: f32 = 3.52;
         const OUTGOING_REFILL_THRESH: f32 = 10.0;
         const OUTGOING_PAUSE_THRESH: f32 = 50.0;
-        const NOTE_IDLE_SECS: f32 = 120.0;
+        const NOTE_IDLE_SECS: f32 = 60.0;
         const RECONCILE_IDLE_SECS: f32 = 120.0;
 
         let queue_scale = link_cfg.data_kbps / BASE_DATA_KBPS;
