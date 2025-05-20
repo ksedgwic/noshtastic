@@ -1,13 +1,11 @@
-.DEFAULT_GOAL := check
-.PHONY: fake clean
+.DEFAULT_GOAL := cli
+
+.PHONY: fake clean cli
 
 ANDROID_DIR := crates/noshtastic-android/android
 
 check:
 	cargo check
-
-tags: fake
-	rusty-tags vi
 
 # NOTE - the `--no-strip` below can be removed to reduce size at the
 # cost of non-symbolic backtraces
@@ -21,6 +19,9 @@ android: jni
 	cd $(ANDROID_DIR) && ./gradlew installDebug
 	adb shell am start -n com.bonsai.noshtastic/.MainActivity
 	adb logcat -v color -s NOSH
+
+cli:
+	cargo build
 
 clean:
 	cargo clean

@@ -87,9 +87,18 @@ regions.  For example a noshtastic relay might cover **`9q[bc89]`**
 
 ## Check out the [Noshtastic Blog](https://ksedgwic.github.io/noshtastic/)
 
-## Install on Android
+## Building
 
-Connect an android phone via USB to the build computer and type:
+### Unix CLI
+
+```
+make cli
+```
+
+### Android
+
+Connect an android phone via USB to the build computer and:
+
 ```
 git submodule update --init
 make android
