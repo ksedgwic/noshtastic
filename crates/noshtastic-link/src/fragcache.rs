@@ -185,17 +185,20 @@ impl FragmentCache {
         let mut fragments_to_send = Vec::new();
 
         // Retrieve the PartialMsg if it exists
-        if let Some(partial) = self.partials.get_mut(&MsgId::new(missing.msgid, None)) {
+        let msgid = MsgId::new(missing.msgid, None);
+        if let Some(partial) = self.partials.get_mut(&msgid) {
             for &fragndx in &missing.fragndx {
                 // Safely access the fragment by index
                 if let Some(fragment) = partial.frags.get_mut(fragndx as usize) {
                     // Skip empty fragments
                     if fragment.is_empty() {
+                        info!("fulfill_missing {}: don't have fragment {}", msgid, fragndx);
                         continue;
                     }
 
                     // Rotate the octets and prepare the fragment for sending
                     let (rotoff, data) = fragment.rotate_octets();
+                    info!("fulfill_missing {}: sending fragment {}", msgid, fragndx);
                     fragments_to_send.push(LinkFrag {
                         msgid: missing.msgid,
                         numfrag: partial.frags.len() as u32,
@@ -205,6 +208,8 @@ impl FragmentCache {
                     });
                 }
             }
+        } else {
+            info!("fulfill_missing {}: don't have msg", msgid);
         }
 
         fragments_to_send
