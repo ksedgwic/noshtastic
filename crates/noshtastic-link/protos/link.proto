@@ -9,7 +9,7 @@ message LinkFrame {
   oneof payload {
     LinkMsg complete = 3;	// A complete, unfragmented message
     LinkFrag fragment = 4;	// A fragment of a message
-    LinkMissing missing = 5;	// Requests missing fragment resend
+    LinkNeed need = 5;		// List of needed fragment resends
   }
 }
 
@@ -28,8 +28,13 @@ message LinkFrag {
   bytes data = 5;		// Raw data buffer for this fragment
 }
 
-// A missing fragment resend request
+// Missing fragments from a particular message
 message LinkMissing {
   fixed64 msgid = 1;		// Truncated nostr msgid (or hash for others)
   repeated uint32 fragndx = 2; 	// List of all missing fragments
+}
+
+// A request for missing fragments from multiple messages
+message LinkNeed {
+  repeated LinkMissing missing = 1;
 }
