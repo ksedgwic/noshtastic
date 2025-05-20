@@ -485,12 +485,14 @@ impl Sync {
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        let priority = Priority::High;
         let msgid = MsgId::from(data);
         self.queue_outgoing_message(
             msgid,
             Some(negmsg),
-            LinkOptionsBuilder::new().priority(priority).build(),
+            LinkOptionsBuilder::new()
+                .action(Action::Drop)
+                .priority(Priority::High)
+                .build(),
         )
     }
 

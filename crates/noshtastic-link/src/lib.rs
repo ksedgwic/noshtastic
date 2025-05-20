@@ -125,6 +125,7 @@ pub enum LinkMessage {
     Payload(LinkPayload),
 }
 
+// only used to send messages "up" to the client
 impl From<LinkMsg> for LinkMessage {
     fn from(msg: LinkMsg) -> Self {
         LinkMessage::Payload(LinkPayload {
