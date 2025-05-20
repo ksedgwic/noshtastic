@@ -20,8 +20,8 @@ use tokio::{
 };
 
 use noshtastic_link::{
-    self, Action, LinkConfig, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload,
-    MsgId, Priority,
+    self, LinkConfig, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
+    Priority,
 };
 
 use crate::{
@@ -477,31 +477,27 @@ impl Sync {
     const ID_PONG: u64 = 2;
 
     fn send_negentropy_message(&self, data: &[u8], is_initial: bool) -> SyncResult<()> {
-        info!(
-            "queueing NegentropyMessage, is_initial: {}, sz: {}",
-            is_initial,
-            data.len()
-        );
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
         });
-        let priority = Priority::High;
         let msgid = MsgId::from(data);
+        info!(
+            "queueing NegentropyMessage {}: is_initial: {}, sz: {}",
+            msgid,
+            is_initial,
+            data.len()
+        );
         self.queue_outgoing_message(
             msgid,
             Some(negmsg),
-            LinkOptionsBuilder::new().priority(priority).build(),
+            LinkOptionsBuilder::new().priority(Priority::High).build(),
         )
     }
 
     fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
         info!("queueing EncNote {} sz: {}", msgid, note_json.len());
         let enc_note = Payload::EncNote(EncNote::try_from(note_json)?);
-        self.queue_outgoing_message(
-            msgid,
-            Some(enc_note),
-            LinkOptionsBuilder::new().action(Action::Drop).build(),
-        )
+        self.queue_outgoing_message(msgid, Some(enc_note), LinkOptionsBuilder::new().build())
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {

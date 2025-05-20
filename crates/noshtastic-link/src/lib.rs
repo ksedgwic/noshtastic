@@ -37,7 +37,6 @@ pub(crate) use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkOptions {
     pub priority: Priority,
-    pub action: Action,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,19 +45,19 @@ pub enum Priority {
     High,
 }
 
-// The Action enum is used both as an input option value and as a return value.
+// The Action enum is used as a return value from enqueue
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Drop,  // drop this msg if a match is already queued
-    Queue, // ignore matches, just queue
-    Limit, // the queue is full, message dropped (only used as return value)
+    Queue, // this message was queued
+    Dup,   // dropped, this message was already in the queue
+    Limit, // dropped, the queue is full
 }
 
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let description = match self {
-            Action::Drop => "Drop",
             Action::Queue => "Queue",
+            Action::Dup => "Dup",
             Action::Limit => "Limit",
         };
         write!(f, "{}", description)
@@ -68,15 +67,11 @@ impl fmt::Display for Action {
 #[derive(Debug, Default)]
 pub struct LinkOptionsBuilder {
     priority: Option<Priority>,
-    action: Option<Action>,
 }
 
 impl LinkOptionsBuilder {
     pub fn new() -> Self {
-        Self {
-            priority: None,
-            action: None,
-        }
+        Self { priority: None }
     }
 
     pub fn priority(mut self, priority: Priority) -> Self {
@@ -84,15 +79,9 @@ impl LinkOptionsBuilder {
         self
     }
 
-    pub fn action(mut self, action: Action) -> Self {
-        self.action = Some(action);
-        self
-    }
-
     pub fn build(self) -> LinkOptions {
         LinkOptions {
             priority: self.priority.unwrap_or(Priority::Normal), // Default priority
-            action: self.action.unwrap_or(Action::Queue),        // Default action
         }
     }
 }
@@ -125,6 +114,7 @@ pub enum LinkMessage {
     Payload(LinkPayload),
 }
 
+// only used to send messages "up" to the client
 impl From<LinkMsg> for LinkMessage {
     fn from(msg: LinkMsg) -> Self {
         LinkMessage::Payload(LinkPayload {

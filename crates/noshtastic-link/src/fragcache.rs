@@ -137,12 +137,12 @@ impl FragmentCache {
 
         let mut missing_requests = Vec::new();
         let overdue_secs = 60;
-        let mut purge_list = Vec::new();
+        let mut _purge_list = Vec::new();
 
         for (&msgid, partial) in &mut self.partials {
             // If message is too old, purge and skip
             if now >= partial.created + MAX_AGE_SECS {
-                purge_list.push(msgid);
+                _purge_list.push(msgid);
                 continue;
             }
             // Only retry if overdue since last attempt
@@ -171,10 +171,10 @@ impl FragmentCache {
             });
         }
 
-        // Purge entries that exceeded the age window
-        for id in purge_list {
-            self.partials.remove(&MsgId::new(id.base, None));
-        }
+        // // Purge entries that exceeded the age window
+        // for id in purge_list {
+        //     self.partials.remove(&MsgId::new(id.base, None));
+        // }
 
         missing_requests
     }
@@ -185,17 +185,20 @@ impl FragmentCache {
         let mut fragments_to_send = Vec::new();
 
         // Retrieve the PartialMsg if it exists
-        if let Some(partial) = self.partials.get_mut(&MsgId::new(missing.msgid, None)) {
+        let msgid = MsgId::new(missing.msgid, None);
+        if let Some(partial) = self.partials.get_mut(&msgid) {
             for &fragndx in &missing.fragndx {
                 // Safely access the fragment by index
                 if let Some(fragment) = partial.frags.get_mut(fragndx as usize) {
                     // Skip empty fragments
                     if fragment.is_empty() {
+                        info!("fulfill_missing {}: don't have fragment {}", msgid, fragndx);
                         continue;
                     }
 
                     // Rotate the octets and prepare the fragment for sending
                     let (rotoff, data) = fragment.rotate_octets();
+                    info!("fulfill_missing {}: sending fragment {}", msgid, fragndx);
                     fragments_to_send.push(LinkFrag {
                         msgid: missing.msgid,
                         numfrag: partial.frags.len() as u32,
@@ -205,6 +208,8 @@ impl FragmentCache {
                     });
                 }
             }
+        } else {
+            info!("fulfill_missing {}: don't have msg", msgid);
         }
 
         fragments_to_send

@@ -22,9 +22,8 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkMissing, Action, FragmentCache, LinkConfig, LinkFrag, LinkFrame,
-    LinkInfo, LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload,
-    Priority,
+    outgoing::Outgoing, proto::LinkNeed, FragmentCache, LinkConfig, LinkFrag, LinkFrame, LinkInfo,
+    LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -33,6 +32,7 @@ const LINK_FRAG_THRESH: usize = 200;
 const LINK_STALE_SECS: i64 = 300; // messages older than this are considered stale
 const LINK_READY_HOLDOFF_SECS: u64 = 5; // wait this long after settled
 const LINK_INFO_SECS: u64 = 60; // send link info periodically
+const LINK_SEND_NEED_SECS: u64 = 180; // send request for needed msgs fragments
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
@@ -143,23 +143,24 @@ impl Link {
     }
 
     fn start_link_info(linkref: LinkRef, stop_signal: Arc<Notify>) -> LinkResult<()> {
-        let mut interval = time::interval(Duration::from_secs(LINK_INFO_SECS));
+        let mut info_iv = time::interval(Duration::from_secs(LINK_INFO_SECS));
+        let mut need_iv = time::interval(Duration::from_secs(LINK_SEND_NEED_SECS));
         task::spawn(async move {
             info!("check_ready starting");
             loop {
                 tokio::select! {
-                    _ = stop_signal.notified() => {
-                        break;
-                    }
-                    _ = interval.tick() => {
-                        {
-                            let link = linkref.lock().await;
-                            let qlen = link.outgoing.qlen().await;
-                            let info = LinkInfo { qlen };
-                            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
-                                error!("send link info: failed to send message: {}", err);
-                            }
-                        }
+                    _ = stop_signal.notified() => break,
+
+                    // every LINK_INFO_SECS
+                    _ = info_iv.tick() => {
+                        let link = linkref.lock().await;
+                        let qlen = link.outgoing.qlen().await;
+                        let info = LinkInfo { qlen };
+                        let _ = link.client_out_tx.send(LinkMessage::Info(info));
+                    },
+
+                    // every LINK_SEND_NEED_SECS
+                    _ = need_iv.tick() => {
                         Self::send_fragment_retries(linkref.clone()).await;
                     }
                 }
@@ -195,31 +196,43 @@ impl Link {
 
     async fn send_fragment_retries(linkref: LinkRef) {
         let mut link = linkref.lock().await;
-        for missing in link.fragcache.overdue_missing() {
-            let msgid = MsgId::new(missing.msgid, None);
-            let fragndx = missing.fragndx.clone();
-            let link_frame = LinkFrame {
-                magic: LINK_MAGIC,
-                version: LINK_VERSION,
-                payload: Some(Payload::Missing(missing)),
-            };
 
-            let outcome = link
-                .outgoing
-                .enqueue(
-                    msgid,
-                    link_frame,
-                    LinkOptionsBuilder::new()
-                        .action(crate::Action::Drop)
-                        .priority(Priority::High)
-                        .build(),
-                )
-                .await;
-            debug!(
-                "queueing LinkMissing {}: {:?} => {}",
-                msgid, fragndx, outcome
-            );
+        // collect all overdue missing entries
+        let missing_list = link.fragcache.overdue_missing();
+        if missing_list.is_empty() {
+            return;
         }
+
+        // build a single LinkNeed containing them all
+        let need = LinkNeed {
+            missing: missing_list.clone(), // assume Vec<LinkMissing>
+        };
+
+        let link_frame = LinkFrame {
+            magic: LINK_MAGIC,
+            version: LINK_VERSION,
+            payload: Some(Payload::Need(need)),
+        };
+
+        // use a synthetic MsgId for the batch‐request
+        let mut buf = Vec::new();
+        link_frame.encode(&mut buf).unwrap();
+        let msgid = MsgId::from(&buf[..]);
+
+        let outcome = link
+            .outgoing
+            .enqueue(
+                msgid,
+                link_frame,
+                LinkOptionsBuilder::new().priority(Priority::High).build(),
+            )
+            .await;
+
+        info!(
+            "queued LinkNeed retry ({} messages) => {}",
+            missing_list.len(),
+            outcome
+        );
     }
 
     // Handle incoming packets from the radio
@@ -279,8 +292,8 @@ impl Link {
             Some(Payload::Fragment(linkfrag)) => {
                 Self::handle_fragment(linkref, linkfrag).await;
             }
-            Some(Payload::Missing(linkmissing)) => {
-                Self::handle_missing(linkref, linkmissing).await;
+            Some(Payload::Need(linkneed)) => {
+                Self::handle_need(linkref, linkneed).await;
             }
             None => {
                 warn!("LinkFrame payload is missing");
@@ -358,37 +371,49 @@ impl Link {
         }
     }
 
-    // Handle requests for missing fragments
-    async fn handle_missing(linkref: &LinkRef, missing: LinkMissing) {
-        let msgid = MsgId::new(missing.msgid, None);
-        info!("received LinkMissing {}: {:?}", msgid, missing.fragndx);
+    // Handle batch‐requests for missing fragments
+    async fn handle_need(linkref: &LinkRef, need: LinkNeed) {
+        info!("received LinkNeed ({} entries)", need.missing.len());
         let mut link = linkref.lock().await;
-        for frag in link.fragcache.fulfill_missing(missing) {
-            let fragndx = frag.fragndx;
-            let numfrag = frag.numfrag;
-            let fraglen = frag.data.len();
-            let rotoff = frag.rotoff;
-            let link_frame = LinkFrame {
-                magic: LINK_MAGIC,
-                version: LINK_VERSION,
-                payload: Some(Payload::Fragment(frag)),
-            };
-            let msgid = MsgId::new(msgid.base, Some(fragndx));
-            let outcome = link
-                .outgoing
-                .enqueue(
-                    msgid,
-                    link_frame,
-                    LinkOptionsBuilder::new()
-                        .priority(Priority::High)
-                        .action(Action::Drop)
-                        .build(),
-                )
-                .await;
+
+        for missing in need.missing {
+            // base ID for this msg
+            let base = missing.msgid;
+            let msgid_base = MsgId::new(base, None);
             info!(
-                "requeueing LinkFrag {}/{}, rotoff: {}, payload sz: {} => {}",
-                msgid, numfrag, rotoff, fraglen, outcome
+                "processing missing for {}: {:?}",
+                msgid_base, missing.fragndx
             );
+
+            // ask cache for the actual fragments to resend
+            for frag in link.fragcache.fulfill_missing(missing.clone()) {
+                let fragndx = frag.fragndx;
+                let numfrag = frag.numfrag;
+                let fraglen = frag.data.len();
+                let rotoff = frag.rotoff;
+
+                // build and enqueue the retry‐fragment
+                let link_frame = LinkFrame {
+                    magic: LINK_MAGIC,
+                    version: LINK_VERSION,
+                    payload: Some(Payload::Fragment(frag.clone())),
+                };
+                let retry_id = MsgId::new(base, Some(fragndx));
+
+                let outcome = link
+                    .outgoing
+                    .enqueue(
+                        retry_id,
+                        link_frame,
+                        LinkOptionsBuilder::new().priority(Priority::High).build(),
+                    )
+                    .await;
+
+                info!(
+                    "requeueing LinkFrag {}/{}, rotoff: {}, sz: {} => {}",
+                    retry_id, numfrag, rotoff, fraglen, outcome
+                );
+            }
         }
     }
 
