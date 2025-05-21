@@ -10,7 +10,7 @@ use std::io::Write;
 
 use crate::SyncResult;
 
-const SYNC_NEGENTROPY_FRAME_SIZE_LIMIT: u64 = 500;
+const SYNC_NEGENTROPY_FRAME_SIZE_LIMIT: u64 = 200;
 
 pub(crate) struct NegentropyState {
     ndb: Ndb,
