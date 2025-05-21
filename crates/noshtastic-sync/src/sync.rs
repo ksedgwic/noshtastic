@@ -193,7 +193,7 @@ impl Sync {
         match sync.negentropy.initiate() {
             Err(err) => error!("trouble in sync initiation: {:?}", err),
             Ok(negbytes) => {
-                if let Err(err) = sync.send_negentropy_message(&negbytes, true) {
+                if let Err(err) = sync.send_negentropy_message(&negbytes, 0) {
                     error!("trouble queueing negentropy message: {:?}", err);
                 }
             }
@@ -318,7 +318,11 @@ impl Sync {
                 sync.handle_enc_note(msgid, enc_note);
             }
             Some(Payload::Negentropy(negmsg)) => {
-                info!("received NegentropyMessage sz: {}", negmsg.data.len());
+                info!(
+                    "received NegentropyMessage: level: {}, sz: {}",
+                    negmsg.level,
+                    negmsg.data.len()
+                );
                 sync.last_sync_recv = Instant::now();
                 if sync.pause_sync {
                     info!("outgoing queues full, sync reconcilation paused");
@@ -333,7 +337,7 @@ impl Sync {
                     Err(err) => error!("trouble reconciling negentropy message: {:?}", err),
                     Ok(None) => info!("SYNCHRONIZED WITH REMOTE"),
                     Ok(Some(nextmsg)) => {
-                        if let Err(err) = sync.send_negentropy_message(&nextmsg, false) {
+                        if let Err(err) = sync.send_negentropy_message(&nextmsg, negmsg.level + 1) {
                             error!("trouble queueing next negentropy message: {:?}", err);
                         }
                     }
@@ -476,15 +480,16 @@ impl Sync {
     const ID_PING: u64 = 1;
     const ID_PONG: u64 = 2;
 
-    fn send_negentropy_message(&self, data: &[u8], is_initial: bool) -> SyncResult<()> {
+    fn send_negentropy_message(&self, data: &[u8], level: u32) -> SyncResult<()> {
         let negmsg = Payload::Negentropy(NegentropyMessage {
             data: data.to_vec(),
+            level,
         });
         let msgid = MsgId::from(data);
         info!(
-            "queueing NegentropyMessage {}: is_initial: {}, sz: {}",
+            "queueing NegentropyMessage {}: level: {}, sz: {}",
             msgid,
-            is_initial,
+            level,
             data.len()
         );
         self.queue_outgoing_message(

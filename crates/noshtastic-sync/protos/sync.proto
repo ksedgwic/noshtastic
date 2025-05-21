@@ -23,6 +23,7 @@ message Pong {
 
 message NegentropyMessage {
   bytes data = 1;
+  uint32 level = 2; // 0 when initialized, increment on reconcile
 }
 
 // utf8 encoded json
