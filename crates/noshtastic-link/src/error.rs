@@ -24,9 +24,15 @@ pub enum LinkError {
     MeshtasticError(#[from] meshtastic::errors::Error),
 }
 
-impl From<mpsc::error::SendError<crate::LinkMessage>> for LinkError {
-    fn from(err: mpsc::error::SendError<crate::LinkMessage>) -> Self {
-        LinkError::InternalError(format!("failed to send message via channel: {:?}", err))
+impl From<mpsc::error::SendError<crate::LinkOutMessage>> for LinkError {
+    fn from(err: mpsc::error::SendError<crate::LinkOutMessage>) -> Self {
+        LinkError::InternalError(format!("failed to send out message via channel: {:?}", err))
+    }
+}
+
+impl From<mpsc::error::SendError<crate::LinkInMessage>> for LinkError {
+    fn from(err: mpsc::error::SendError<crate::LinkInMessage>) -> Self {
+        LinkError::InternalError(format!("failed to send in message via channel: {:?}", err))
     }
 }
 

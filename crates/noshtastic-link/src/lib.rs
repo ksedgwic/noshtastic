@@ -34,17 +34,6 @@ pub use link::{Link, LinkRef};
 pub(crate) use fragcache::FragmentCache;
 pub(crate) use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkOptions {
-    pub priority: Priority,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Priority {
-    Normal,
-    High,
-}
-
 // The Action enum is used as a return value from enqueue
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -64,12 +53,60 @@ impl fmt::Display for Action {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkInfo {
+    pub qlen: [usize; 2], // lengths [high, normal]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkInPayload {
+    pub msgid: MsgId,
+    pub data: Vec<u8>,
+}
+
+impl LinkInPayload {
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkInMessage {
+    // link is ready, sent upstream to client
+    Ready,
+    // periodic link information
+    Info(LinkInfo),
+    // link data payload, used in both directions
+    Payload(LinkInPayload),
+}
+
+// only used to send messages "up" to the client
+impl From<LinkMsg> for LinkInMessage {
+    fn from(msg: LinkMsg) -> Self {
+        LinkInMessage::Payload(LinkInPayload {
+            msgid: MsgId::new(msg.msgid, None),
+            data: msg.data,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkOutOptions {
+    pub priority: Priority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Priority {
+    Normal,
+    High,
+}
+
 #[derive(Debug, Default)]
-pub struct LinkOptionsBuilder {
+pub struct LinkOutOptionsBuilder {
     priority: Option<Priority>,
 }
 
-impl LinkOptionsBuilder {
+impl LinkOutOptionsBuilder {
     pub fn new() -> Self {
         Self { priority: None }
     }
@@ -79,50 +116,30 @@ impl LinkOptionsBuilder {
         self
     }
 
-    pub fn build(self) -> LinkOptions {
-        LinkOptions {
+    pub fn build(self) -> LinkOutOptions {
+        LinkOutOptions {
             priority: self.priority.unwrap_or(Priority::Normal), // Default priority
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkInfo {
-    pub qlen: [usize; 2], // lengths [high, normal]
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkPayload {
+pub struct LinkOutPayload {
     pub msgid: MsgId,
-    pub options: LinkOptions,
+    pub options: LinkOutOptions,
     pub data: Vec<u8>,
 }
 
-impl LinkPayload {
+impl LinkOutPayload {
     pub fn to_bytes(&self) -> &[u8] {
         &self.data
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LinkMessage {
-    // link is ready, sent upstream to client
-    Ready,
-    // periodic link information
-    Info(LinkInfo),
-    // link data payload, used in both directions
-    Payload(LinkPayload),
-}
-
-// only used to send messages "up" to the client
-impl From<LinkMsg> for LinkMessage {
-    fn from(msg: LinkMsg) -> Self {
-        LinkMessage::Payload(LinkPayload {
-            msgid: MsgId::new(msg.msgid, None),
-            options: LinkOptionsBuilder::new().build(),
-            data: msg.data,
-        })
-    }
+pub enum LinkOutMessage {
+    // link outgoing data payload
+    Payload(LinkOutPayload),
 }
 
 pub async fn scan_for_radios() -> LinkResult<Vec<String>> {
@@ -141,8 +158,8 @@ pub async fn create_link(
 ) -> LinkResult<(
     LinkConfig,
     LinkRef,
-    mpsc::UnboundedSender<LinkMessage>,
-    mpsc::UnboundedReceiver<LinkMessage>,
+    mpsc::UnboundedSender<LinkOutMessage>,
+    mpsc::UnboundedReceiver<LinkInMessage>,
 )> {
     debug!("info_link starting");
 
@@ -167,8 +184,8 @@ pub async fn create_link(
     // |        rx | <------------ | tx      rx | <----------- | tx         |
     // +-----------+               +------------+              +------------+
 
-    let (client_in_tx, client_in_rx) = mpsc::unbounded_channel::<LinkMessage>();
-    let (client_out_tx, client_out_rx) = mpsc::unbounded_channel::<LinkMessage>();
+    let (client_in_tx, client_in_rx) = mpsc::unbounded_channel::<LinkOutMessage>();
+    let (client_out_tx, client_out_rx) = mpsc::unbounded_channel::<LinkInMessage>();
 
     // create the link
     let linkref = Arc::new(Mutex::new(Link::new(
@@ -437,9 +454,9 @@ mod tests {
 
     #[test]
     fn test_link_payload_escape_roundtrip() {
-        let payload = LinkPayload {
+        let payload = LinkOutPayload {
             msgid: MsgId::new(123, None),
-            options: LinkOptionsBuilder::new().build(),
+            options: LinkOutOptionsBuilder::new().build(),
             data: vec![0x94, 0xC3, 0xEE, 0x01],
         };
         let escaped = escape94c3(&payload.data);

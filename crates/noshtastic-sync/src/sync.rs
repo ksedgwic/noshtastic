@@ -20,8 +20,8 @@ use tokio::{
 };
 
 use noshtastic_link::{
-    self, LinkConfig, LinkInfo, LinkMessage, LinkOptions, LinkOptionsBuilder, LinkPayload, MsgId,
-    Priority,
+    self, LinkConfig, LinkInMessage, LinkInfo, LinkOutMessage, LinkOutOptions,
+    LinkOutOptionsBuilder, LinkOutPayload, MsgId, Priority,
 };
 
 use crate::{
@@ -71,7 +71,7 @@ pub struct Sync {
     policy: SyncPolicy,
     _stop_signal: Arc<Notify>,
     ndb: Ndb,
-    link_tx: mpsc::UnboundedSender<LinkMessage>,
+    link_tx: mpsc::UnboundedSender<LinkOutMessage>,
     incoming_tx: mpsc::UnboundedSender<String>,
     ping_duration: Option<Duration>, // None means no pinging
     max_notes: u32,
@@ -88,8 +88,8 @@ impl Sync {
     pub fn new(
         link_config: &LinkConfig,
         ndb: Ndb,
-        link_tx: mpsc::UnboundedSender<LinkMessage>,
-        link_rx: mpsc::UnboundedReceiver<LinkMessage>,
+        link_tx: mpsc::UnboundedSender<LinkOutMessage>,
+        link_rx: mpsc::UnboundedReceiver<LinkInMessage>,
         incoming_tx: UnboundedSender<String>,
         stop_signal: Arc<Notify>,
     ) -> SyncResult<SyncRef> {
@@ -126,7 +126,7 @@ impl Sync {
     fn link_info(syncref: SyncRef, info: LinkInfo) {
         let mut sync = syncref.lock().unwrap();
         info!(
-            "saw LinkMessage::Info: {:?}, last_sync: {} last_note: {}",
+            "saw LinkInMessage::Info: {:?}, last_sync: {} last_note: {}",
             &info,
             sync.last_sync_recv.elapsed().as_secs(),
             sync.last_note_recv.elapsed().as_secs(),
@@ -258,7 +258,7 @@ impl Sync {
 
     fn start_message_handler(
         syncref: SyncRef,
-        mut receiver: mpsc::UnboundedReceiver<LinkMessage>,
+        mut receiver: mpsc::UnboundedReceiver<LinkInMessage>,
         stop_signal: Arc<Notify>,
     ) {
         tokio::spawn(async move {
@@ -267,13 +267,13 @@ impl Sync {
                 tokio::select! {
                     Some(msg) = receiver.recv() => {
                         match msg {
-                            LinkMessage::Ready => {
+                            LinkInMessage::Ready => {
                                 Self::link_ready(syncref.clone());
                             },
-                            LinkMessage::Info(info) => {
+                            LinkInMessage::Info(info) => {
                                 Self::link_info(syncref.clone(), info);
                             },
-                            LinkMessage::Payload(payload) => {
+                            LinkInMessage::Payload(payload) => {
                                 match SyncMessage::decode(&payload.data[..]) {
                                     Ok(decoded) => {
                                         Self::handle_sync_message(
@@ -415,7 +415,7 @@ impl Sync {
         &self,
         msgid: MsgId,
         payload: Option<Payload>,
-        options: LinkOptions,
+        options: LinkOutOptions,
     ) -> SyncResult<()> {
         // Create a SyncMessage
         let message = SyncMessage {
@@ -433,7 +433,7 @@ impl Sync {
         task::block_in_place(|| {
             let runtime = tokio::runtime::Handle::current();
             runtime.block_on(async {
-                self.link_tx.send(LinkMessage::Payload(LinkPayload {
+                self.link_tx.send(LinkOutMessage::Payload(LinkOutPayload {
                     msgid,
                     data: buffer,
                     options,
@@ -495,14 +495,16 @@ impl Sync {
         self.queue_outgoing_message(
             msgid,
             Some(negmsg),
-            LinkOptionsBuilder::new().priority(Priority::High).build(),
+            LinkOutOptionsBuilder::new()
+                .priority(Priority::High)
+                .build(),
         )
     }
 
     fn send_encoded_note(&self, msgid: MsgId, note_json: &str) -> SyncResult<()> {
         info!("queueing EncNote {} sz: {}", msgid, note_json.len());
         let enc_note = Payload::EncNote(EncNote::try_from(note_json)?);
-        self.queue_outgoing_message(msgid, Some(enc_note), LinkOptionsBuilder::new().build())
+        self.queue_outgoing_message(msgid, Some(enc_note), LinkOutOptionsBuilder::new().build())
     }
 
     fn send_ping(&self, ping_id: u32) -> SyncResult<()> {
@@ -510,7 +512,7 @@ impl Sync {
         self.queue_outgoing_message(
             MsgId::new(Self::ID_PING, None),
             Some(Payload::Ping(Ping { id: ping_id })),
-            LinkOptionsBuilder::new().build(),
+            LinkOutOptionsBuilder::new().build(),
         )
     }
 
@@ -519,7 +521,7 @@ impl Sync {
         self.queue_outgoing_message(
             MsgId::new(Self::ID_PONG, None),
             Some(Payload::Pong(Pong { id: pong_id })),
-            LinkOptionsBuilder::new().build(),
+            LinkOutOptionsBuilder::new().build(),
         )
     }
 

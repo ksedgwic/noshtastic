@@ -22,8 +22,9 @@ use tokio::{
 };
 
 use crate::{
-    outgoing::Outgoing, proto::LinkNeed, FragmentCache, LinkConfig, LinkFrag, LinkFrame, LinkInfo,
-    LinkMessage, LinkMsg, LinkOptionsBuilder, LinkPayload, LinkResult, MsgId, Payload, Priority,
+    outgoing::Outgoing, proto::LinkNeed, FragmentCache, LinkConfig, LinkFrag, LinkFrame,
+    LinkInMessage, LinkInfo, LinkMsg, LinkOutMessage, LinkOutOptionsBuilder, LinkOutPayload,
+    LinkResult, MsgId, Payload, Priority,
 };
 
 const LINK_VERSION: u32 = 1;
@@ -36,7 +37,7 @@ const LINK_SEND_NEED_SECS: u64 = 180; // send request for needed msgs fragments
 
 pub struct Link {
     pub(crate) stream_api: ConnectedStreamApi,
-    client_out_tx: mpsc::UnboundedSender<LinkMessage>,
+    client_out_tx: mpsc::UnboundedSender<LinkInMessage>,
     _stop_signal: Arc<Notify>,
     pub(crate) my_node_num: u32,
     fragcache: FragmentCache,
@@ -50,7 +51,7 @@ impl Link {
     pub(crate) fn new(
         link_config: &LinkConfig,
         stream_api: ConnectedStreamApi,
-        client_out_tx: mpsc::UnboundedSender<LinkMessage>,
+        client_out_tx: mpsc::UnboundedSender<LinkInMessage>,
         stop_signal: Arc<Notify>,
     ) -> Self {
         Link {
@@ -73,7 +74,7 @@ impl Link {
     pub(crate) async fn start(
         linkref: &LinkRef,
         mesh_in_rx: PacketReceiver,
-        client_in_rx: mpsc::UnboundedReceiver<LinkMessage>,
+        client_in_rx: mpsc::UnboundedReceiver<LinkOutMessage>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<()> {
         // Listen for incoming messages from the radio
@@ -156,7 +157,7 @@ impl Link {
                         let link = linkref.lock().await;
                         let qlen = link.outgoing.qlen().await;
                         let info = LinkInfo { qlen };
-                        let _ = link.client_out_tx.send(LinkMessage::Info(info));
+                        let _ = link.client_out_tx.send(LinkInMessage::Info(info));
                     },
 
                     // every LINK_SEND_NEED_SECS
@@ -177,7 +178,7 @@ impl Link {
         }
         if Instant::now() >= link.ready_deadline {
             // Mark as ready!
-            if let Err(err) = link.client_out_tx.send(LinkMessage::Ready) {
+            if let Err(err) = link.client_out_tx.send(LinkInMessage::Ready) {
                 error!("maybe_declare_ready: failed to send message: {}", err);
             }
             link.declared_ready = true;
@@ -185,7 +186,7 @@ impl Link {
             // Follow with an immediate NodeInfo so we can initiate right away
             let qlen = link.outgoing.qlen().await;
             let info = LinkInfo { qlen };
-            if let Err(err) = link.client_out_tx.send(LinkMessage::Info(info)) {
+            if let Err(err) = link.client_out_tx.send(LinkInMessage::Info(info)) {
                 error!("send link info: failed to send message: {}", err);
             }
 
@@ -224,7 +225,9 @@ impl Link {
             .enqueue(
                 msgid,
                 link_frame,
-                LinkOptionsBuilder::new().priority(Priority::High).build(),
+                LinkOutOptionsBuilder::new()
+                    .priority(Priority::High)
+                    .build(),
             )
             .await;
 
@@ -317,18 +320,22 @@ impl Link {
         link.outgoing
             .cancel(
                 msgid,
-                LinkOptionsBuilder::new().priority(Priority::High).build(),
+                LinkOutOptionsBuilder::new()
+                    .priority(Priority::High)
+                    .build(),
             )
             .await;
         link.outgoing
             .cancel(
                 msgid,
-                LinkOptionsBuilder::new().priority(Priority::Normal).build(),
+                LinkOutOptionsBuilder::new()
+                    .priority(Priority::Normal)
+                    .build(),
             )
             .await;
 
         // send the message to the client
-        if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)) {
+        if let Err(err) = link.client_out_tx.send(LinkInMessage::from(linkmsg)) {
             error!("failed to send message: {}", err);
         }
     }
@@ -352,20 +359,24 @@ impl Link {
         link.outgoing
             .cancel(
                 msgid,
-                LinkOptionsBuilder::new().priority(Priority::High).build(),
+                LinkOutOptionsBuilder::new()
+                    .priority(Priority::High)
+                    .build(),
             )
             .await;
         link.outgoing
             .cancel(
                 msgid,
-                LinkOptionsBuilder::new().priority(Priority::Normal).build(),
+                LinkOutOptionsBuilder::new()
+                    .priority(Priority::Normal)
+                    .build(),
             )
             .await;
 
         // add the fragment and if completed send the message to the client
         if let Some(linkmsg) = link.fragcache.add_fragment(&frag, inbound) {
             info!("completed LinkFrag {}", msgid);
-            if let Err(err) = link.client_out_tx.send(LinkMessage::from(linkmsg)) {
+            if let Err(err) = link.client_out_tx.send(LinkInMessage::from(linkmsg)) {
                 error!("failed to send message: {}", err);
             }
         }
@@ -405,7 +416,9 @@ impl Link {
                     .enqueue(
                         retry_id,
                         link_frame,
-                        LinkOptionsBuilder::new().priority(Priority::High).build(),
+                        LinkOutOptionsBuilder::new()
+                            .priority(Priority::High)
+                            .build(),
                     )
                     .await;
 
@@ -419,7 +432,7 @@ impl Link {
 
     fn start_client_listener(
         linkref: LinkRef,
-        mut client_in_rx: mpsc::UnboundedReceiver<LinkMessage>,
+        mut client_in_rx: mpsc::UnboundedReceiver<LinkOutMessage>,
         stop_signal: Arc<Notify>,
     ) -> LinkResult<()> {
         task::spawn(async move {
@@ -441,18 +454,19 @@ impl Link {
         Ok(())
     }
 
-    async fn send_link_message(linkref: LinkRef, msg: LinkMessage) -> LinkResult<()> {
-        let LinkMessage::Payload(payload) = msg else {
-            panic!("This routine requires a payload message");
-        };
-        if payload.data.len() > LINK_FRAG_THRESH {
-            Ok(Self::send_fragments(linkref, payload).await?)
-        } else {
-            Ok(Self::send_complete(linkref, payload).await?)
+    async fn send_link_message(linkref: LinkRef, msg: LinkOutMessage) -> LinkResult<()> {
+        match msg {
+            LinkOutMessage::Payload(payload) => {
+                if payload.data.len() > LINK_FRAG_THRESH {
+                    Ok(Self::send_fragments(linkref, payload).await?)
+                } else {
+                    Ok(Self::send_complete(linkref, payload).await?)
+                }
+            }
         }
     }
 
-    async fn send_complete(linkref: LinkRef, payload: LinkPayload) -> LinkResult<()> {
+    async fn send_complete(linkref: LinkRef, payload: LinkOutPayload) -> LinkResult<()> {
         let link_msg = LinkMsg {
             msgid: payload.msgid.base,
             data: payload.data.clone(),
@@ -476,7 +490,7 @@ impl Link {
         Ok(())
     }
 
-    async fn send_fragments(linkref: LinkRef, payload: LinkPayload) -> LinkResult<()> {
+    async fn send_fragments(linkref: LinkRef, payload: LinkOutPayload) -> LinkResult<()> {
         let data = &payload.data;
         let numfrag: u32 = payload.data.len().div_ceil(LINK_FRAG_THRESH) as u32;
         let rotoff = 0;

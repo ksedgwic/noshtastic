@@ -18,7 +18,7 @@ use tokio::{
 };
 
 use crate::{
-    Action, LinkConfig, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority,
+    Action, LinkConfig, LinkError, LinkFrame, LinkOutOptions, LinkRef, LinkResult, MsgId, Priority,
 };
 
 #[derive(Debug)]
@@ -101,7 +101,7 @@ impl Outgoing {
         &mut self,
         msgid: MsgId,
         frame: LinkFrame,
-        options: LinkOptions,
+        options: LinkOutOptions,
     ) -> Action {
         let mut queues = self.queuesref.lock().await;
         let need_wakeup = queues.is_empty();
@@ -127,7 +127,7 @@ impl Outgoing {
         outcome
     }
 
-    pub(crate) async fn cancel(&mut self, msgid: MsgId, options: LinkOptions) {
+    pub(crate) async fn cancel(&mut self, msgid: MsgId, options: LinkOutOptions) {
         // When the link receives a message it should cancel any
         // outgoing copies of the message (another node beat us to
         // it) ...
