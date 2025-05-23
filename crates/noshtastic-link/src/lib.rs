@@ -37,9 +37,10 @@ pub(crate) use proto::{link_frame::Payload, LinkFrag, LinkFrame, LinkMsg};
 // The Action enum is used as a return value from enqueue
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Queue, // this message was queued
-    Dup,   // dropped, this message was already in the queue
-    Limit, // dropped, the queue is full
+    Queue,   // this message was queued
+    Dup,     // dropped, this message was already in the queue
+    Preempt, // dropped, better stuff already in the queue
+    Limit,   // dropped, the queue is full
 }
 
 impl fmt::Display for Action {
@@ -47,6 +48,7 @@ impl fmt::Display for Action {
         let description = match self {
             Action::Queue => "Queue",
             Action::Dup => "Dup",
+            Action::Preempt => "Preempt",
             Action::Limit => "Limit",
         };
         write!(f, "{}", description)
@@ -91,24 +93,35 @@ impl From<LinkMsg> for LinkInMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkOutOptions {
-    pub priority: Priority,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Priority {
     Normal,
     High,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Policy {
+    Normal,              // drop duplicate msgid
+    Classy(String, u32), // preempt lower values from same class
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkOutOptions {
+    pub priority: Priority,
+    pub policy: Policy,
+}
+
 #[derive(Debug, Default)]
 pub struct LinkOutOptionsBuilder {
     priority: Option<Priority>,
+    policy: Option<Policy>,
 }
 
 impl LinkOutOptionsBuilder {
     pub fn new() -> Self {
-        Self { priority: None }
+        Self {
+            priority: None,
+            policy: None,
+        }
     }
 
     pub fn priority(mut self, priority: Priority) -> Self {
@@ -116,9 +129,15 @@ impl LinkOutOptionsBuilder {
         self
     }
 
+    pub fn policy(mut self, policy: Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
     pub fn build(self) -> LinkOutOptions {
         LinkOutOptions {
             priority: self.priority.unwrap_or(Priority::Normal), // Default priority
+            policy: self.policy.unwrap_or(Policy::Normal),       // Default policy
         }
     }
 }

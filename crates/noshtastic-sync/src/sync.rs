@@ -21,7 +21,7 @@ use tokio::{
 
 use noshtastic_link::{
     self, LinkConfig, LinkInMessage, LinkInfo, LinkOutMessage, LinkOutOptions,
-    LinkOutOptionsBuilder, LinkOutPayload, MsgId, Priority,
+    LinkOutOptionsBuilder, LinkOutPayload, MsgId, Policy, Priority,
 };
 
 use crate::{
@@ -497,6 +497,7 @@ impl Sync {
             Some(negmsg),
             LinkOutOptionsBuilder::new()
                 .priority(Priority::High)
+                .policy(Policy::Classy("negentropy".into(), level))
                 .build(),
         )
     }
