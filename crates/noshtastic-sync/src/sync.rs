@@ -7,7 +7,7 @@ use futures::StreamExt;
 use log::*;
 use nostrdb::{Filter, IngestMetadata, Ndb, NoteKey, Transaction};
 use prost::Message;
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{thread_rng, Rng};
 use std::{
     fmt,
     sync::{Arc, Mutex},
@@ -450,12 +450,15 @@ impl Sync {
     }
 
     fn send_needed_notes(&self, mut needed: Vec<Vec<u8>>) -> SyncResult<()> {
-        // Shuffle the notes do reduce duplication w/ other nodes
-        // responding to the same needs ...
-        needed.shuffle(&mut thread_rng());
+        // Pick a random rotation offset so we don't transmit the same messages
+        // as other nodes that have similar content.
+        if !needed.is_empty() {
+            let offset = thread_rng().gen_range(0..needed.len());
+            needed.rotate_left(offset);
+        }
 
         let txn = Transaction::new(&self.ndb)?;
-        for id in needed.iter() {
+        for id in &needed {
             if id.len() == 32 {
                 let id_array: &[u8; 32] = id.as_slice().try_into().unwrap();
                 match self.ndb.get_note_by_id(&txn, id_array) {
@@ -466,7 +469,6 @@ impl Sync {
                                 .send_encoded_note(MsgId::from_nostr_msgid(note.id()), &note_json)
                             {
                                 error!("trouble queueing needed raw note: {:?}", err);
-                                // keep going
                             }
                         }
                     }
