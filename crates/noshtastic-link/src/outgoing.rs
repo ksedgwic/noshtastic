@@ -18,7 +18,8 @@ use tokio::{
 };
 
 use crate::{
-    Action, LinkConfig, LinkError, LinkFrame, LinkOptions, LinkRef, LinkResult, MsgId, Priority,
+    Action, LinkConfig, LinkError, LinkFrame, LinkOutOptions, LinkRef, LinkResult, MsgId, Policy,
+    Priority,
 };
 
 #[derive(Debug)]
@@ -51,8 +52,8 @@ impl OutgoingPolicy {
 
 #[derive(Debug)]
 struct Queues {
-    normal: VecDeque<(MsgId, LinkFrame)>,
-    high: VecDeque<(MsgId, LinkFrame)>,
+    normal: VecDeque<(MsgId, Policy, LinkFrame)>,
+    high: VecDeque<(MsgId, Policy, LinkFrame)>,
 }
 
 impl Queues {
@@ -101,33 +102,62 @@ impl Outgoing {
         &mut self,
         msgid: MsgId,
         frame: LinkFrame,
-        options: LinkOptions,
+        options: LinkOutOptions,
     ) -> Action {
         let mut queues = self.queuesref.lock().await;
         let need_wakeup = queues.is_empty();
+
+        // pick normal vs high
         let queue = match options.priority {
             Priority::Normal => &mut queues.normal,
             Priority::High => &mut queues.high,
         };
-        let outcome = if queue.len() > self.policy.outgoing_queue_max {
-            Action::Limit // drop
-        } else {
-            if !queue.iter().any(|(id, _)| *id == msgid) {
-                queue.push_back((msgid, frame));
-                Action::Queue
-            } else {
-                Action::Dup // drop
-            }
-        };
-        if need_wakeup {
-            if let Err(err) = self.notify.as_ref().unwrap().send(()) {
-                error!("trouble sending notification to regulator: {:?}", err);
-            }
+
+        // 1) queue-size cap
+        if queue.len() > self.policy.outgoing_queue_max {
+            return Action::Limit;
         }
-        outcome
+
+        // 2) dedupe by msgid
+        if queue
+            .iter()
+            .any(|(existing_id, _, _)| existing_id == &msgid)
+        {
+            return Action::Dup;
+        }
+
+        // 3) classy preempt/purge
+        if let Policy::Classy(ref class, level) = options.policy {
+            // a) preempt if any same-class entry has > level, equals stays
+            if queue.iter().any(|(_, pol, _)| {
+                matches!(
+                    pol,
+                    Policy::Classy(ref c2, ref l2)
+                        if c2 == class && *l2 > level
+                )
+            }) {
+                return Action::Preempt;
+            }
+            // b) purge any same-class with lower level, equal stays
+            queue.retain(|(_, pol, _)| {
+                !matches!(
+                    pol,
+                    Policy::Classy(ref c2, ref l2)
+                        if c2 == class && *l2 < level
+                )
+            });
+        }
+
+        // 4) enqueue
+        queue.push_back((msgid, options.policy.clone(), frame));
+
+        if need_wakeup {
+            let _ = self.notify.as_ref().unwrap().send(());
+        }
+        Action::Queue
     }
 
-    pub(crate) async fn cancel(&mut self, msgid: MsgId, options: LinkOptions) {
+    pub(crate) async fn cancel(&mut self, msgid: MsgId, options: LinkOutOptions) {
         // When the link receives a message it should cancel any
         // outgoing copies of the message (another node beat us to
         // it) ...
@@ -142,7 +172,7 @@ impl Outgoing {
 
         // Retain only those elements that do not match the given `msgid`
         let original_len = queue.len();
-        queue.retain(|(id, _)| *id != msgid);
+        queue.retain(|(id, _policy, _frame)| *id != msgid);
 
         let removed_count = original_len - queue.len();
         if removed_count > 0 {
@@ -164,7 +194,7 @@ impl Outgoing {
                     .pop_front()
                     .or_else(|| queues.normal.pop_front())
                 {
-                    Some((msgid, frame)) => {
+                    Some((msgid, _policy, frame)) => {
                         let qlens = vec![queues.high.len(), queues.normal.len()];
                         drop(queues);
 
