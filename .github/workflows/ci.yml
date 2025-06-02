@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Add Cargo bin to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Install platform-tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platform-tools
+
+      - name: Install SDK platform 33
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-33
+
+      - name: Install build-tools 33.0.2
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            build-tools;33.0.2
+
+      - name: Install NDK 25.2.9519653
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            ndk;25.2.9519653
+
+      - name: Install DBus dev + pkg-config
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install protobuf‐compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Build CLI
+        run: cargo build --package noshtastic-cli
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Build Android APK
+        run: make apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: noshtastic-apk
+          path: crates/noshtastic-android/android/app/build/outputs/apk/debug/app-debug.apk
